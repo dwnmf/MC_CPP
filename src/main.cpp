@@ -261,12 +261,14 @@ void load_blocks(World& world, TextureManager& tm) {
         world.block_types[number] = new BlockType(&tm, name, texture, model);
     }
 }
+
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height); SCR_WIDTH = width; SCR_HEIGHT = height;
     if(player_ptr) { player_ptr->view_width=width; player_ptr->view_height=height; }
     if(text_renderer) text_renderer->SetScreenSize(width, height);
     update_crosshair_mesh(width, height);
 }
+
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     if(!mouse_captured) return;
     static double lastX = 400, lastY = 300; static bool firstMouse = true;
@@ -278,6 +280,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
         if (player_ptr->rotation.y < -1.57f) player_ptr->rotation.y = -1.57f;
     }
 }
+
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     if(action == GLFW_PRESS) {
         if(!mouse_captured) {
@@ -293,6 +296,7 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
         }
     }
 }
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action == GLFW_PRESS) {
         if (key == GLFW_KEY_ESCAPE) { mouse_captured = false; glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); }
