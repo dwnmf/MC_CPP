@@ -36,6 +36,13 @@ file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.h" "src/*/*.cpp" "src/*/*.h")
 # Создаем исполняемый файл
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+# Тесты (headless)
+set(TEST_SOURCES ${SOURCES})
+list(FILTER TEST_SOURCES EXCLUDE REGEX "src[/\\\\]main\\.cpp$")
+add_executable(mc_tests ${TEST_SOURCES} tests/tests_main.cpp)
+target_compile_definitions(mc_tests PRIVATE UNIT_TEST)
+target_link_libraries(mc_tests PRIVATE glfw glad zlib)
+
 # Присоединяем (линкуем) библиотеки
 target_link_libraries(${PROJECT_NAME} PRIVATE glfw glad zlib)
 

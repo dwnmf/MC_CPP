@@ -6,6 +6,10 @@
 #include <stb_image.h>
 
 TextureManager::TextureManager(int w, int h, int max_tex) : texture_width(w), texture_height(h), max_textures(max_tex) {
+#ifdef UNIT_TEST
+    texture_array = 0;
+    return;
+#endif
     glGenTextures(1, &texture_array);
     glBindTexture(GL_TEXTURE_2D_ARRAY, texture_array);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, Options::MIPMAP_TYPE);
@@ -17,12 +21,20 @@ TextureManager::TextureManager(int w, int h, int max_tex) : texture_width(w), te
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA, texture_width, texture_height, max_textures, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 }
 
-void TextureManager::generate_mipmaps() { glGenerateMipmap(GL_TEXTURE_2D_ARRAY); }
+void TextureManager::generate_mipmaps() {
+#ifndef UNIT_TEST
+    glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+#endif
+}
 
 void TextureManager::add_texture(std::string texture) {
     if (std::find(textures.begin(), textures.end(), texture) != textures.end()) return;
     textures.push_back(texture);
     int index = textures.size() - 1;
+#ifdef UNIT_TEST
+    (void)index;
+    return;
+#endif
     std::string path = "assets/textures/" + texture + ".png";
     int width, height, nrChannels;
     unsigned char *data = stbi_load(path.c_str(), &width, &height, &nrChannels, 4);

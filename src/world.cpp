@@ -5,7 +5,8 @@
 #include <glm/gtc/type_ptr.hpp>
 
 World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_manager(tm), player(p) {
-    shader_daylight_loc = shader->find_uniform("u_Daylight");
+#ifndef UNIT_TEST
+    shader_daylight_loc = shader ? shader->find_uniform("u_Daylight") : -1;
     std::vector<unsigned int> indices;
     for (int i=0; i<CHUNK_WIDTH*CHUNK_HEIGHT*CHUNK_LENGTH*8; i++) {
         indices.insert(indices.end(), {4u*i, 4u*i+1, 4u*i+2, 4u*i+2, 4u*i+3, 4u*i});
@@ -13,8 +14,15 @@ World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_mana
     glGenBuffers(1, &ibo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size()*sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+#endif
 }
-World::~World() { glDeleteBuffers(1, &ibo); for(auto& kv : chunks) delete kv.second; delete save_system; }
+World::~World() {
+#ifndef UNIT_TEST
+    if (ibo) glDeleteBuffers(1, &ibo);
+#endif
+    for(auto& kv : chunks) delete kv.second;
+    if(save_system) delete save_system;
+}
 glm::ivec3 World::get_chunk_pos(glm::vec3 pos) { return glm::ivec3(floor(pos.x/16), floor(pos.y/128), floor(pos.z/16)); }
 glm::ivec3 World::get_local_pos(glm::vec3 pos) {
     int x = (int)floor(pos.x) % 16; if(x<0) x+=16;
@@ -287,16 +295,25 @@ void World::tick(float dt) {
     for(auto* c : visible_chunks) c->process_chunk_updates();
 }
 void World::prepare_rendering() {
+#ifdef UNIT_TEST
+    return;
+#endif
     visible_chunks.clear(); for(auto& kv : chunks) { if(player->check_in_frustum(kv.first)) visible_chunks.push_back(kv.second); }
     std::sort(visible_chunks.begin(), visible_chunks.end(), [&](Chunk* a, Chunk* b){ return glm::distance(player->position, a->position) > glm::distance(player->position, b->position); });
 }
 void World::draw() {
+#ifdef UNIT_TEST
+    return;
+#endif
     float dm = daylight / 1800.0f; glClearColor(0.5 * (dm-0.26), 0.8*(dm-0.26), (dm-0.26)*1.36, 1.0);
     shader->setFloat(shader_daylight_loc, dm); glEnable(GL_CULL_FACE);
     for(auto* c : visible_chunks) c->draw(GL_TRIANGLES);
     draw_translucent();
 }
 void World::draw_translucent() {
+#ifdef UNIT_TEST
+    return;
+#endif
     glDepthMask(GL_FALSE); glFrontFace(GL_CW); glEnable(GL_BLEND);
     for(auto* c : visible_chunks) c->draw_translucent(GL_TRIANGLES);
     glFrontFace(GL_CCW); for(auto* c : visible_chunks) c->draw_translucent(GL_TRIANGLES);
