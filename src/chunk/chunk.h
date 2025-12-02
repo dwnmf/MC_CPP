@@ -31,8 +31,8 @@ public:
     int mesh_quad_count = 0;
     int translucent_quad_count = 0;
 
-    GLuint vao, vbo;
-    int shader_chunk_offset_loc;
+    GLuint vao = 0, vbo = 0;
+    int shader_chunk_offset_loc = -1;
 
     Chunk(World* w, glm::ivec3 pos);
     ~Chunk();

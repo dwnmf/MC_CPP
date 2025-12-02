@@ -35,9 +35,9 @@ public:
     long time = 0;
     int chunk_update_counter = 0;
     int pending_chunk_update_count = 0;
-    GLuint ibo;
-    int shader_daylight_loc;
-    Save* save_system;
+    GLuint ibo = 0;
+    int shader_daylight_loc = -1;
+    Save* save_system = nullptr;
 
     World(Shader* s, TextureManager* tm, Player* p);
     ~World();

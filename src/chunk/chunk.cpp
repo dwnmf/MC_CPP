@@ -15,6 +15,7 @@ Chunk::Chunk(World* w, glm::ivec3 pos) : world(w), chunk_position(pos) {
             for(int z=0; z<CHUNK_LENGTH/SUBCHUNK_LENGTH; z++)
                 subchunks[std::make_tuple(x,y,z)] = new Subchunk(this, {x,y,z});
 
+#ifndef UNIT_TEST
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
     glGenBuffers(1, &vbo);
@@ -30,10 +31,17 @@ Chunk::Chunk(World* w, glm::ivec3 pos) : world(w), chunk_position(pos) {
     glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, stride, (void*)(8*sizeof(float))); glEnableVertexAttribArray(4);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, world->ibo);
-    shader_chunk_offset_loc = world->shader->find_uniform("u_ChunkPosition");
+    shader_chunk_offset_loc = world->shader ? world->shader->find_uniform("u_ChunkPosition") : -1;
+#endif
 }
 
-Chunk::~Chunk() { glDeleteVertexArrays(1, &vao); glDeleteBuffers(1, &vbo); for(auto& kv : subchunks) delete kv.second; }
+Chunk::~Chunk() {
+#ifndef UNIT_TEST
+    if (vao) glDeleteVertexArrays(1, &vao);
+    if (vbo) glDeleteBuffers(1, &vbo);
+#endif
+    for(auto& kv : subchunks) delete kv.second;
+}
 
 int Chunk::get_block_light(glm::ivec3 pos) { return lightmap[pos.x][pos.y][pos.z] & 0xF; }
 void Chunk::set_block_light(glm::ivec3 pos, int v) { lightmap[pos.x][pos.y][pos.z] = (lightmap[pos.x][pos.y][pos.z] & 0xF0) | v; }
@@ -104,6 +112,9 @@ void Chunk::update_mesh() {
 }
 
 void Chunk::send_mesh_data_to_gpu() {
+#ifdef UNIT_TEST
+    return;
+#endif
     if(!mesh_quad_count && !translucent_quad_count) return;
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -113,6 +124,9 @@ void Chunk::send_mesh_data_to_gpu() {
 }
 
 void Chunk::draw(GLenum mode) {
+#ifdef UNIT_TEST
+    return;
+#endif
     if(!mesh_quad_count) return;
     glBindVertexArray(vao);
     world->shader->setVec2i(shader_chunk_offset_loc, chunk_position.x, chunk_position.z);
@@ -120,6 +134,9 @@ void Chunk::draw(GLenum mode) {
 }
 
 void Chunk::draw_translucent(GLenum mode) {
+#ifdef UNIT_TEST
+    return;
+#endif
     if(!translucent_quad_count) return;
     glBindVertexArray(vao);
     world->shader->setVec2i(shader_chunk_offset_loc, chunk_position.x, chunk_position.z);
