@@ -1,0 +1,12 @@
+https://aistudio.google.com/app/prompts/1v_h_NDdIBbRoeqk66Z-si_J3IV0-mv6Z
+
+stb_image.h: https://github.com/nothings/stb/blob/master/stb_image.h
+stb_truetype.h: https://github.com/nothings/stb/blob/master/stb_truetype.h
+glad (OpenGL 3.3 Core): https://glad.dav1d.de
+glm: https://github.com/g-truc/glm/releases
+glfw: https://www.glfw.org/download.html
+zlib: https://github.com/madler/zlib/releases
+miniaudio.h: https://github.com/mackron/miniaudio/blob/master/miniaudio.h
+
+Minecraftia.ttf:
+кинуть в assets/font.ttf

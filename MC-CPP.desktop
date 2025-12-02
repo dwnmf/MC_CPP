@@ -1,0 +1,16 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Categories=Game
+Comment=
+Exec=/home/arta/MC-CPP/build/MC-CPP
+GenericName=
+Icon=/home/arta/MC-CPP/build/assets/Icon.png
+MimeType=
+Name=MC-CPP
+Path=/home/arta/MC-CPP/build
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=
