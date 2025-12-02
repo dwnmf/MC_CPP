@@ -2,6 +2,7 @@
 #include <iostream>
 #include <filesystem>
 #include <random>
+#include <algorithm>
 
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
@@ -11,6 +12,7 @@ ma_sound music_sound;
 std::vector<std::string> Audio::music_files;
 float Audio::next_music_time = 0.0f;
 bool Audio::is_playing = false;
+float Audio::volume = 0.5f;
 bool engine_initialized = false;
 
 void Audio::Init() {
@@ -26,6 +28,7 @@ void Audio::Init() {
     }
 
     engine_initialized = true;
+    ma_engine_set_volume(&engine, volume);
     std::cout << "[Audio] Engine initialized successfully." << std::endl;
 
     // Сканируем папку с музыкой
@@ -79,7 +82,7 @@ void Audio::PlayMusic() {
     }
 
     // Настройка и запуск
-    ma_sound_set_volume(&music_sound, 0.5f); // 50% громкости
+    ma_sound_set_volume(&music_sound, volume);
     ma_sound_start(&music_sound);
     is_playing = true;
 
@@ -117,4 +120,18 @@ void Audio::Update(float dt) {
 void Audio::Close() {
     if (is_playing) ma_sound_uninit(&music_sound);
     if (engine_initialized) ma_engine_uninit(&engine);
+}
+
+void Audio::SetVolume(float newVolume) {
+    volume = std::clamp(newVolume, 0.0f, 1.0f);
+    if (engine_initialized) {
+        ma_engine_set_volume(&engine, volume);
+        if (is_playing) {
+            ma_sound_set_volume(&music_sound, volume);
+        }
+    }
+}
+
+float Audio::GetVolume() {
+    return volume;
 }

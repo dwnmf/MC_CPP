@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <iostream>
 #include <algorithm>
+#include <vector>
+#include <cmath>
 
 namespace fs = std::filesystem;
 
@@ -19,6 +21,11 @@ std::string to_base36(int value) {
     while (val > 0) { result = chars[val % 36] + result; val /= 36; }
     if (value < 0) result = "-" + result;
     return result;
+}
+
+namespace {
+int manhattan_distance(const glm::ivec3& pos) { return std::abs(pos.x) + std::abs(pos.z); }
+int ring_distance(const glm::ivec3& pos) { return std::max(std::abs(pos.x), std::abs(pos.z)); }
 }
 
 void Save::save() {
@@ -68,89 +75,124 @@ void Save::save() {
     std::cout << "Saved " << saved_count << " chunks." << std::endl;
 }
 
-void Save::load() {
+bool Save::load_chunk(const glm::ivec3& chunk_pos) {
+    if (world->chunks.find(chunk_pos) != world->chunks.end()) return false;
+
+    Chunk* c = new Chunk(world, chunk_pos);
+    world->chunks[chunk_pos] = c;
+    bool loaded = false;
+
+    // Пробуем загрузить из структурированной папки (NBT)
+    int x = chunk_pos.x;
+    int z = chunk_pos.z;
+    int rx = x % 64; if(rx<0) rx+=64;
+    int rz = z % 64; if(rz<0) rz+=64;
+    std::string nbt_path = path + "/" + to_base36(rx) + "/" + to_base36(rz) + "/c." + to_base36(x) + "." + to_base36(z) + ".dat";
+    if (std::filesystem::exists(nbt_path)) {
+        if (NBT::read_blocks_from_gzip(nbt_path, (uint8_t*)c->blocks, sizeof(c->blocks))) loaded = true;
+    }
+
+    // Fallback: Пробуем старый формат (плоская папка), если вдруг он остался
+    if (!loaded) {
+        std::string bin_path = path + "/c." + std::to_string(x) + "." + std::to_string(z) + ".dat";
+        std::ifstream in(bin_path, std::ios::binary);
+        if (in.is_open()) { in.read((char*)c->blocks, sizeof(c->blocks)); loaded = true; }
+    }
+
+    // Генерация нового чанка, если не загрузили
+    if (!loaded) {
+        // Flat world gen
+        for (int lx = 0; lx < CHUNK_WIDTH; lx++) {
+            for (int lz = 0; lz < CHUNK_LENGTH; lz++) {
+                for (int ly = 0; ly < CHUNK_HEIGHT; ly++) {
+                    if (ly < 60) c->blocks[lx][ly][lz] = 1;
+                    else if (ly < 64) c->blocks[lx][ly][lz] = 3;
+                    else if (ly == 64) c->blocks[lx][ly][lz] = 2;
+                    else c->blocks[lx][ly][lz] = 0;
+                }
+            }
+        }
+        c->modified = true;
+    }
+
+    // Инициализация света для только что созданного чанка
+    world->init_skylight(c);
+
+    // Проставляем block light для источников
+    auto is_light_source = [&](int id) {
+        return std::find(world->light_blocks.begin(), world->light_blocks.end(), id) != world->light_blocks.end();
+    };
+
+    for(int lx=0; lx<CHUNK_WIDTH; lx++) {
+        for(int ly=0; ly<CHUNK_HEIGHT; ly++) {
+            for(int lz=0; lz<CHUNK_LENGTH; lz++) {
+                int id = c->blocks[lx][ly][lz];
+                if (id == 0) continue;
+                if (is_light_source(id)) {
+                    c->set_block_light({lx,ly,lz}, 15);
+                    glm::ivec3 global_pos = {c->chunk_position.x * 16 + lx, ly, c->chunk_position.z * 16 + lz};
+                    world->light_increase_queue.push_back({global_pos, 15});
+                }
+            }
+        }
+    }
+
+    world->propagate_skylight_increase(false);
+    world->propagate_increase(false);
+
+    c->update_subchunk_meshes();
+    return true;
+}
+
+void Save::load(int initial_radius) {
     std::cout << "Loading world..." << std::endl;
 
     world->light_increase_queue.clear();
     world->skylight_increase_queue.clear();
+    pending_chunks.clear();
 
-    // 1. LOAD BLOCKS
-    for(int x = (-1) * Options::RENDER_DISTANCE; x < Options::RENDER_DISTANCE; x++) {
-        for(int z = (-1) * Options::RENDER_DISTANCE; z < Options::RENDER_DISTANCE; z++) {
-            glm::ivec3 pos = {x, 0, z};
-            world->chunks[pos] = new Chunk(world, pos);
-            Chunk* c = world->chunks[pos];
-            bool loaded = false;
+    const int radius = Options::RENDER_DISTANCE;
+    const int max_initial = std::max(0, radius - 1);
+    initial_radius = std::clamp(initial_radius, 0, max_initial);
 
-            // Пробуем загрузить из структурированной папки (NBT)
-            int rx = x % 64; if(rx<0) rx+=64;
-            int rz = z % 64; if(rz<0) rz+=64;
-            std::string nbt_path = path + "/" + to_base36(rx) + "/" + to_base36(rz) + "/c." + to_base36(x) + "." + to_base36(z) + ".dat";
-            if (std::filesystem::exists(nbt_path)) {
-                if (NBT::read_blocks_from_gzip(nbt_path, (uint8_t*)c->blocks, sizeof(c->blocks))) loaded = true;
-            }
-
-            // Fallback: Пробуем старый формат (плоская папка), если вдруг он остался
-            if (!loaded) {
-                std::string bin_path = path + "/c." + std::to_string(x) + "." + std::to_string(z) + ".dat";
-                std::ifstream in(bin_path, std::ios::binary);
-                if (in.is_open()) { in.read((char*)c->blocks, sizeof(c->blocks)); loaded = true; }
-            }
-
-            // Генерация нового чанка, если не загрузили
-            if (!loaded) {
-                // Flat world gen
-                for (int lx = 0; lx < CHUNK_WIDTH; lx++) {
-                    for (int lz = 0; lz < CHUNK_LENGTH; lz++) {
-                        for (int ly = 0; ly < CHUNK_HEIGHT; ly++) {
-                            if (ly < 60) c->blocks[lx][ly][lz] = 1;
-                            else if (ly < 64) c->blocks[lx][ly][lz] = 3;
-                            else if (ly == 64) c->blocks[lx][ly][lz] = 2;
-                            else c->blocks[lx][ly][lz] = 0;
-                        }
-                    }
-                }
-                c->modified = true;
-            }
+    std::vector<glm::ivec3> positions;
+    positions.reserve(radius * radius * 4);
+    for(int x = (-1) * radius; x < radius; x++) {
+        for(int z = (-1) * radius; z < radius; z++) {
+            positions.push_back({x, 0, z});
         }
     }
 
-    std::cout << "Calculating light..." << std::endl;
+    std::sort(positions.begin(), positions.end(), [](const glm::ivec3& a, const glm::ivec3& b){
+        int da = manhattan_distance(a);
+        int db = manhattan_distance(b);
+        if (da == db) return ring_distance(a) < ring_distance(b);
+        return da < db;
+    });
 
-    // 2. INIT SKYLIGHT
-    // Must be done for ALL chunks before propagation starts
-    for(auto& kv : world->chunks) {
-        world->init_skylight(kv.second);
-    }
-
-    // 3. INIT BLOCK LIGHT
-    for(auto& kv : world->chunks) {
-        Chunk* c = kv.second;
-        for(int x=0; x<CHUNK_WIDTH; x++) {
-            for(int y=0; y<CHUNK_HEIGHT; y++) {
-                for(int z=0; z<CHUNK_LENGTH; z++) {
-                    int id = c->blocks[x][y][z];
-                    if (id == 0) continue;
-                    bool is_light_source = false;
-                    for(int light_id : world->light_blocks) {
-                        if(id == light_id) { is_light_source = true; break; }
-                    }
-                    if (is_light_source) {
-                        c->set_block_light({x,y,z}, 15);
-                        glm::ivec3 global_pos = {c->chunk_position.x * 16 + x, y, c->chunk_position.z * 16 + z};
-                        world->light_increase_queue.push_back({global_pos, 15});
-                    }
-                }
-            }
+    int loaded_now = 0;
+    for (const auto& pos : positions) {
+        if (ring_distance(pos) <= initial_radius) {
+            load_chunk(pos);
+            loaded_now++;
+        } else {
+            pending_chunks.push_back(pos);
         }
     }
 
-    std::cout << "Propagating light..." << std::endl;
+    std::cout << "Loaded " << loaded_now << " chunks upfront, queued " << pending_chunks.size() << " for streaming." << std::endl;
+}
 
-    // 4. PROPAGATE
-    world->propagate_skylight_increase(false);
-    world->propagate_increase(false);
-
-    std::cout << "Building meshes..." << std::endl;
-    for(auto& kv : world->chunks) kv.second->update_subchunk_meshes();
+void Save::stream_next(int max_chunks) {
+    if (max_chunks <= 0) return;
+    int loaded = 0;
+    while (loaded < max_chunks && !pending_chunks.empty()) {
+        glm::ivec3 pos = pending_chunks.front();
+        pending_chunks.pop_front();
+        load_chunk(pos);
+        loaded++;
+    }
+    if (pending_chunks.empty() && loaded > 0) {
+        std::cout << "Chunk streaming finished." << std::endl;
+    }
 }

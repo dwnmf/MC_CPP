@@ -35,6 +35,7 @@ int holding_block = 1;
 bool is_fullscreen = false;
 int windowed_x = 100, windowed_y = 100, windowed_w = 1366, windowed_h = 768;
 bool show_f3 = false;
+bool in_menu = true;
 
 // --- CROSSHAIR (INVERTED & THICK) ---
 GLuint crosshairVAO, crosshairVBO;
@@ -270,6 +271,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (in_menu) return;
     if(!mouse_captured) return;
     static double lastX = 400, lastY = 300; static bool firstMouse = true;
     if (firstMouse) { lastX = xpos; lastY = ypos; firstMouse = false; }
@@ -282,6 +284,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 }
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (in_menu) return;
     if(action == GLFW_PRESS) {
         if(!mouse_captured) {
             mouse_captured = true; glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -298,6 +301,10 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 }
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (in_menu) {
+        if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) glfwSetWindowShouldClose(window, true);
+        return;
+    }
     if (action == GLFW_PRESS) {
         if (key == GLFW_KEY_ESCAPE) { mouse_captured = false; glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); }
         if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9) holding_block = key - GLFW_KEY_0;
@@ -372,6 +379,55 @@ int main() {
     text_renderer = new TextRenderer(SCR_WIDTH, SCR_HEIGHT);
     text_renderer->Load("assets/font.ttf", 24);
 
+    float menu_volume = Audio::GetVolume();
+    double menu_prev = glfwGetTime();
+    while (!glfwWindowShouldClose(window) && in_menu) {
+        double menu_now = glfwGetTime();
+        float menu_dt = static_cast<float>(menu_now - menu_prev);
+        menu_prev = menu_now;
+
+        glfwPollEvents();
+
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            menu_volume = std::clamp(menu_volume - menu_dt * 0.5f, 0.0f, 1.0f);
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            menu_volume = std::clamp(menu_volume + menu_dt * 0.5f, 0.0f, 1.0f);
+        if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+            in_menu = false;
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        glClearColor(0.06f, 0.08f, 0.10f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+
+        int percent = static_cast<int>(menu_volume * 100.0f + 0.5f);
+        const int barSegments = 20;
+        int filledSegments = static_cast<int>(menu_volume * barSegments + 0.5f);
+        std::string bar = "[" + std::string(filledSegments, '=') + std::string(barSegments - filledSegments, ' ') + "]";
+
+        text_renderer->RenderText(GAME_TITLE, 40.0f, 80.0f, 1.6f, glm::vec3(1.0f));
+        text_renderer->RenderText("Music volume: " + std::to_string(percent) + "%", 40.0f, 130.0f, 1.0f, glm::vec3(0.9f));
+        text_renderer->RenderText(bar, 40.0f, 170.0f, 1.0f, glm::vec3(0.8f));
+        text_renderer->RenderText("A/D or Left/Right - adjust", 40.0f, 220.0f, 0.9f, glm::vec3(0.75f));
+        text_renderer->RenderText("Enter/Space - start, Esc - quit", 40.0f, 250.0f, 0.9f, glm::vec3(0.75f));
+
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_DEPTH_TEST);
+
+        glfwSwapBuffers(window);
+    }
+
+    if (glfwWindowShouldClose(window)) {
+        glfwTerminate();
+        return 0;
+    }
+
+    Audio::SetVolume(menu_volume);
+    in_menu = false;
+
     Shader shader("assets/shaders/colored_lighting/vert.glsl", "assets/shaders/colored_lighting/frag.glsl");
     TextureManager tm(16, 16, 256);
     World world(&shader, &tm, nullptr);
@@ -401,6 +457,7 @@ int main() {
         lastTime = now;
 
         Audio::Update(limit); // Обновление музыки
+        if (world.save_system) world.save_system->stream_next(1); // Постепенно подгружаем чанки без длинного старта
 
         while (delta >= 1.0) {
             player.input = glm::vec3(0);
@@ -444,6 +501,7 @@ int main() {
     }
 
     world.save_system->save();
+    Audio::Close();
     glfwTerminate();
     return 0;
 }
