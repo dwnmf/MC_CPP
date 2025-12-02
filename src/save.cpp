@@ -24,8 +24,8 @@ std::string to_base36(int value) {
 }
 
 namespace {
-int manhattan_distance(const glm::ivec3& pos) { return std::abs(pos.x) + std::abs(pos.z); }
-int ring_distance(const glm::ivec3& pos) { return std::max(std::abs(pos.x), std::abs(pos.z)); }
+int manhattan_distance_offset(const glm::ivec3& offset) { return std::abs(offset.x) + std::abs(offset.z); }
+int ring_distance_offset(const glm::ivec3& offset) { return std::max(std::abs(offset.x), std::abs(offset.z)); }
 }
 
 void Save::save() {
@@ -145,7 +145,12 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
 }
 
 void Save::load(int initial_radius) {
-    std::cout << "Loading world..." << std::endl;
+    glm::ivec3 center_chunk(0);
+    if (world && world->player) {
+        center_chunk = world->get_chunk_pos(world->player->position);
+    }
+
+    std::cout << "Loading world around chunk (" << center_chunk.x << ", " << center_chunk.z << ")..." << std::endl;
 
     world->light_increase_queue.clear();
     world->skylight_increase_queue.clear();
@@ -155,28 +160,29 @@ void Save::load(int initial_radius) {
     const int max_initial = std::max(0, radius - 1);
     initial_radius = std::clamp(initial_radius, 0, max_initial);
 
-    std::vector<glm::ivec3> positions;
-    positions.reserve(radius * radius * 4);
+    std::vector<glm::ivec3> offsets;
+    offsets.reserve(radius * radius * 4);
     for(int x = (-1) * radius; x < radius; x++) {
         for(int z = (-1) * radius; z < radius; z++) {
-            positions.push_back({x, 0, z});
+            offsets.push_back({x, 0, z});
         }
     }
 
-    std::sort(positions.begin(), positions.end(), [](const glm::ivec3& a, const glm::ivec3& b){
-        int da = manhattan_distance(a);
-        int db = manhattan_distance(b);
-        if (da == db) return ring_distance(a) < ring_distance(b);
+    std::sort(offsets.begin(), offsets.end(), [](const glm::ivec3& a, const glm::ivec3& b){
+        int da = manhattan_distance_offset(a);
+        int db = manhattan_distance_offset(b);
+        if (da == db) return ring_distance_offset(a) < ring_distance_offset(b);
         return da < db;
     });
 
     int loaded_now = 0;
-    for (const auto& pos : positions) {
-        if (ring_distance(pos) <= initial_radius) {
-            load_chunk(pos);
+    for (const auto& offset : offsets) {
+        glm::ivec3 chunk_pos = center_chunk + offset;
+        if (ring_distance_offset(offset) <= initial_radius) {
+            load_chunk(chunk_pos);
             loaded_now++;
         } else {
-            pending_chunks.push_back(pos);
+            pending_chunks.push_back(chunk_pos);
         }
     }
 

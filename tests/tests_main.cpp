@@ -32,6 +32,10 @@ static BlockType* make_block_type(bool transparent, bool glass = false, bool tra
     bt->glass = glass;
     bt->translucent = translucent;
     bt->is_cube = true;
+    bt->vertex_positions = std::vector<std::vector<float>>(6, std::vector<float>(12, 0.0f));
+    bt->tex_coords = std::vector<std::vector<float>>(6, std::vector<float>(8, 0.0f));
+    bt->tex_indices = std::vector<int>(6, 0);
+    bt->shading_values = std::vector<std::vector<float>>(6, std::vector<float>(4, 1.0f));
     return bt;
 }
 
@@ -45,6 +49,8 @@ static std::unique_ptr<World> build_test_world() {
     auto world = std::make_unique<World>(nullptr, nullptr, nullptr);
     world->block_types.resize(11);
     world->block_types[1] = make_solid_block_with_collider();   // Solid block
+    world->block_types[2] = make_solid_block_with_collider();   // Ground block
+    world->block_types[3] = make_solid_block_with_collider();   // Grass block
     world->block_types[10] = make_block_type(false);            // Light source
     return world;
 }
@@ -136,6 +142,27 @@ static void test_hit_ray_finds_block(TestRunner& tr) {
     tr.check(ivec_equal(hit_block, glm::ivec3(1, 0, 0)), "hit_ray_block_coords", "Raycast should hit the block at (1,0,0)");
 }
 
+static void test_save_load_centers_on_player(TestRunner& tr) {
+    auto world = build_test_world();
+    Player player(world.get(), nullptr, 800, 600);
+    world->player = &player;
+
+    // Place the player far from the origin so the loaded area should not include (0,0) chunks
+    player.position = glm::vec3(800.0f, 80.0f, -800.0f); // Chunk (50, 0, -50)
+
+    Save save(world.get());
+    save.path = "save_test_render_center";
+    save.load(2);
+
+    glm::ivec3 center_chunk = world->get_chunk_pos(player.position);
+
+    bool center_loaded = world->chunks.find(center_chunk) != world->chunks.end();
+    bool origin_loaded = world->chunks.find(glm::ivec3(0)) != world->chunks.end();
+
+    tr.check(center_loaded, "save_load_includes_player_chunk", "Save::load should start around the player's chunk, not the origin");
+    tr.check(!origin_loaded, "save_load_skips_distant_origin", "Chunks far outside the player's render radius should stay unloaded");
+}
+
 int main() {
     TestRunner tr;
     test_chunk_and_local_coords(tr);
@@ -144,5 +171,6 @@ int main() {
     test_block_placement_collides_with_player(tr);
     test_collider_sweep(tr);
     test_hit_ray_finds_block(tr);
+    test_save_load_centers_on_player(tr);
     return tr.report();
 }
