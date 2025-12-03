@@ -8,6 +8,7 @@ public:
     unsigned int ID;
     Shader(const char* vertexPath, const char* fragmentPath);
     ~Shader();
+    bool valid() const { return ID != 0; }
     void use();
     int find_uniform(const std::string& name);
     void setMat4(int location, const glm::mat4& mat) const;

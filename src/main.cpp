@@ -19,6 +19,7 @@
 #include "models/all_models.h"
 #include "text_renderer.h"
 #include "audio.h"
+#include "renderer/post_processor.h"
 
 // --- КОНСТАНТЫ ---
 const std::string GAME_TITLE = "MC-CPP";
@@ -29,6 +30,7 @@ int SCR_HEIGHT = 768;
 World* world_ptr = nullptr;
 Player* player_ptr = nullptr;
 TextRenderer* text_renderer = nullptr;
+PostProcessor* post_processor = nullptr;
 
 bool mouse_captured = false;
 int holding_block = 1;
@@ -267,6 +269,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height); SCR_WIDTH = width; SCR_HEIGHT = height;
     if(player_ptr) { player_ptr->view_width=width; player_ptr->view_height=height; }
     if(text_renderer) text_renderer->SetScreenSize(width, height);
+    if(post_processor) post_processor->resize(width, height);
     update_crosshair_mesh(width, height);
 }
 
@@ -378,6 +381,7 @@ int main() {
 
     text_renderer = new TextRenderer(SCR_WIDTH, SCR_HEIGHT);
     text_renderer->Load("assets/font.ttf", 24);
+    post_processor = new PostProcessor(SCR_WIDTH, SCR_HEIGHT);
 
     float menu_volume = Audio::GetVolume();
     double menu_prev = glfwGetTime();
@@ -421,6 +425,7 @@ int main() {
     }
 
     if (glfwWindowShouldClose(window)) {
+        delete post_processor;
         glfwTerminate();
         return 0;
     }
@@ -430,6 +435,8 @@ int main() {
 
     Shader shader("assets/shaders/colored_lighting/vert.glsl", "assets/shaders/colored_lighting/frag.glsl");
     TextureManager tm(16, 16, 256);
+    shader.use();
+    shader.setInt(shader.find_uniform("u_TextureArraySampler"), 0);
     World world(&shader, &tm, nullptr);
     Player player(&world, &shader, SCR_WIDTH, SCR_HEIGHT);
     world.player = &player;
@@ -481,12 +488,20 @@ int main() {
 
         float daylight_factor = world.daylight / 1800.0f;
         glClearColor(0.5f * daylight_factor, 0.8f * daylight_factor, 1.0f * daylight_factor, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        post_processor->beginRender();
         shader.use();
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, tm.texture_array);
         player.update_matrices(delta);
         world.prepare_rendering();
         world.draw();
+
+        glm::ivec3 headPos = glm::round(player.interpolated_position + glm::vec3(0, player.eyelevel, 0));
+        int headBlock = world.get_block_number(headPos);
+        bool isUnderwater = (headBlock == 8 || headBlock == 9);
+
+        post_processor->endRenderAndDraw(isUnderwater, static_cast<float>(now));
 
         draw_crosshair();
         draw_f3_screen(fps_display);
@@ -505,6 +520,7 @@ int main() {
 
     world.save_system->save();
     Audio::Close();
+    delete post_processor;
     glfwTerminate();
     return 0;
 }

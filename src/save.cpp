@@ -117,6 +117,18 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
     }
 
     // Генерация нового чанка, если не загрузили
+    if (loaded) {
+        bool has_data = false;
+        for (int lx = 0; lx < CHUNK_WIDTH && !has_data; lx++) {
+            for (int ly = 0; ly < CHUNK_HEIGHT && !has_data; ly++) {
+                for (int lz = 0; lz < CHUNK_LENGTH; lz++) {
+                    if (c->blocks[lx][ly][lz] != 0) { has_data = true; break; }
+                }
+            }
+        }
+        if (!has_data) loaded = false;
+    }
+
     if (!loaded) {
         // Flat world gen
         for (int lx = 0; lx < CHUNK_WIDTH; lx++) {
@@ -173,6 +185,23 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
     update_neighbor(Util::WEST);
     update_neighbor(Util::NORTH);
     update_neighbor(Util::SOUTH);
+
+    // Build all subchunks immediately so the chunk is renderable right after load.
+    for (auto& kv : c->subchunks) {
+        kv.second->update_mesh();
+    }
+    c->update_mesh();
+
+    // Debug: warn if mesh ended up empty right after generation/load
+    if (c->mesh_quad_count == 0 && c->translucent_quad_count == 0) {
+        int filled = 0;
+        for (int lx = 0; lx < CHUNK_WIDTH; lx++)
+            for (int ly = 0; ly < CHUNK_HEIGHT; ly++)
+                for (int lz = 0; lz < CHUNK_LENGTH; lz++)
+                    if (c->blocks[lx][ly][lz] != 0) filled++;
+        std::cout << "Chunk " << chunk_pos.x << "," << chunk_pos.z
+                  << " mesh empty right after build. Filled blocks=" << filled << std::endl;
+    }
 
     return true;
 }
