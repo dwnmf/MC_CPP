@@ -20,8 +20,8 @@ Chunk::Chunk(World* w, glm::ivec3 pos) : world(w), chunk_position(pos) {
     glBindVertexArray(vao);
     glGenBuffers(1, &vbo);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    // 9 floats per vertex * 4 vertices * blocks volume * 6 faces (approx)
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float)*CHUNK_WIDTH*CHUNK_HEIGHT*CHUNK_LENGTH*9*6, NULL, GL_DYNAMIC_DRAW);
+    // Дадим драйверу минимум памяти, реальный размер будем выделять по факту в send_mesh_data_to_gpu
+    glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_DYNAMIC_DRAW);
 
     size_t stride = 9 * sizeof(float);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0); glEnableVertexAttribArray(0);
@@ -102,9 +102,18 @@ void Chunk::process_chunk_updates() {
 
 void Chunk::update_mesh() {
     mesh.clear(); translucent_mesh.clear();
+    size_t mesh_total = 0;
+    size_t translucent_total = 0;
+    for (auto& kv : subchunks) {
+        mesh_total += kv.second->mesh.size();
+        translucent_total += kv.second->translucent_mesh.size();
+    }
+    if (mesh_total) mesh.reserve(mesh_total);
+    if (translucent_total) translucent_mesh.reserve(translucent_total);
+
     for(auto& kv : subchunks) {
-        mesh.insert(mesh.end(), kv.second->mesh.begin(), kv.second->mesh.end());
-        translucent_mesh.insert(translucent_mesh.end(), kv.second->translucent_mesh.begin(), kv.second->translucent_mesh.end());
+        if(!kv.second->mesh.empty()) mesh.insert(mesh.end(), kv.second->mesh.begin(), kv.second->mesh.end());
+        if(!kv.second->translucent_mesh.empty()) translucent_mesh.insert(translucent_mesh.end(), kv.second->translucent_mesh.begin(), kv.second->translucent_mesh.end());
     }
     mesh_quad_count = mesh.size() / 36; // 9 floats * 4 vertices
     translucent_quad_count = translucent_mesh.size() / 36;
@@ -115,10 +124,14 @@ void Chunk::send_mesh_data_to_gpu() {
 #ifdef UNIT_TEST
     return;
 #endif
-    if(!mesh_quad_count && !translucent_quad_count) return;
+    size_t required_floats = mesh.size() + translucent_mesh.size();
+    if(!required_floats) { vbo_capacity = 0; return; }
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float)*(mesh.size() + translucent_mesh.size()), NULL, GL_DYNAMIC_DRAW);
+    if(required_floats != vbo_capacity) {
+        glBufferData(GL_ARRAY_BUFFER, sizeof(float)*required_floats, NULL, GL_DYNAMIC_DRAW);
+        vbo_capacity = required_floats;
+    }
     if(!mesh.empty()) glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(float)*mesh.size(), mesh.data());
     if(!translucent_mesh.empty()) glBufferSubData(GL_ARRAY_BUFFER, sizeof(float)*mesh.size(), sizeof(float)*translucent_mesh.size(), translucent_mesh.data());
 }

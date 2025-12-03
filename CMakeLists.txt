@@ -1,7 +1,26 @@
 cmake_minimum_required(VERSION 3.17)
 project(MC-CPP)
 
+if(POLICY CMP0069)
+    cmake_policy(SET CMP0069 NEW) # ENABLE IPO
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+if(MSVC)
+    add_compile_options(/O2 /DNDEBUG /permissive-)
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
+else()
+    add_compile_options(-O3 -march=native -mtune=native -DNDEBUG -flto=6)
+    add_link_options(-flto=6)
+endif()
+add_compile_definitions(GLM_ENABLE_EXPERIMENTAL)
 
 # Включаем stb_image
 include_directories(
@@ -14,6 +33,9 @@ include_directories(
 )
 
 # Настройка GLFW из исходников
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 add_subdirectory(include/glfw)
 
 # Создание библиотеки GLAD

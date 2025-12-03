@@ -1,6 +1,8 @@
 #include "player.h"
 #include "../options.h"
+#include "../chunk/chunk.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/norm.hpp>
 
 // Константы скорости
 const float WALKING_SPEED = 4.317f;
@@ -63,7 +65,7 @@ void Player::update_matrices(float partial_ticks) {
     // Динамический FOV при беге
     float fov_mod = Options::FOV + 10.0f * (speed - WALKING_SPEED) / (SPRINTING_SPEED - WALKING_SPEED);
 
-    p_matrix = glm::perspective(glm::radians(Options::FOV), view_width/view_height, 0.1f, 500.0f);
+    p_matrix = glm::perspective(glm::radians(fov_mod), view_width/view_height, 0.1f, 500.0f);
     mv_matrix = glm::mat4(1.0f);
     mv_matrix = glm::rotate(mv_matrix, rotation.y, glm::vec3(-1,0,0));
     mv_matrix = glm::rotate(mv_matrix, rotation.x + 1.57f, glm::vec3(0,1,0));
@@ -71,7 +73,47 @@ void Player::update_matrices(float partial_ticks) {
     // ДОБАВЛЕНО: + step_offset к высоте глаз
     mv_matrix = glm::translate(mv_matrix, -interpolated_position - glm::vec3(0, eyelevel + step_offset, 0));
 
-    shader->setMat4(shader->find_uniform("u_MVPMatrix"), p_matrix * mv_matrix);
+    vp_matrix = p_matrix * mv_matrix;
+    shader->setMat4(shader->find_uniform("u_MVPMatrix"), vp_matrix);
 }
 
-bool Player::check_in_frustum(glm::ivec3 chunk_pos) { return true; }
+bool Player::check_in_frustum(glm::ivec3 chunk_pos) {
+    glm::vec3 chunk_min = glm::vec3(chunk_pos.x * CHUNK_WIDTH, chunk_pos.y * CHUNK_HEIGHT, chunk_pos.z * CHUNK_LENGTH);
+    glm::vec3 chunk_max = chunk_min + glm::vec3(CHUNK_WIDTH, CHUNK_HEIGHT, CHUNK_LENGTH);
+    glm::vec3 center = (chunk_min + chunk_max) * 0.5f;
+
+    float max_dist = static_cast<float>(Options::RENDER_DISTANCE * CHUNK_WIDTH);
+    if (glm::length2(center - position) > max_dist * max_dist) return false;
+
+    glm::vec4 corners[8] = {
+        {chunk_min.x, chunk_min.y, chunk_min.z, 1.0f},
+        {chunk_max.x, chunk_min.y, chunk_min.z, 1.0f},
+        {chunk_min.x, chunk_max.y, chunk_min.z, 1.0f},
+        {chunk_max.x, chunk_max.y, chunk_min.z, 1.0f},
+        {chunk_min.x, chunk_min.y, chunk_max.z, 1.0f},
+        {chunk_max.x, chunk_min.y, chunk_max.z, 1.0f},
+        {chunk_min.x, chunk_max.y, chunk_max.z, 1.0f},
+        {chunk_max.x, chunk_max.y, chunk_max.z, 1.0f}
+    };
+
+    int outside_left = 0, outside_right = 0, outside_bottom = 0, outside_top = 0, outside_near = 0, outside_far = 0;
+    for (auto& corner : corners) {
+        glm::vec4 clip = vp_matrix * corner;
+        float w = clip.w;
+        if (w <= 0.0f) { outside_near++; continue; } // за ближней плоскостью
+
+        if (clip.x < -w) outside_left++;
+        if (clip.x >  w) outside_right++;
+        if (clip.y < -w) outside_bottom++;
+        if (clip.y >  w) outside_top++;
+        if (clip.z < -w) outside_near++;
+        if (clip.z >  w) outside_far++;
+    }
+
+    if (outside_left == 8 || outside_right == 8 ||
+        outside_bottom == 8 || outside_top == 8 ||
+        outside_near == 8 || outside_far == 8) {
+        return false;
+    }
+    return true;
+}

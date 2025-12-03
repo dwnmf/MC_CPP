@@ -6,6 +6,7 @@ class Player : public Entity {
 public:
     float view_width, view_height;
     glm::mat4 p_matrix, mv_matrix;
+    glm::mat4 vp_matrix;
     Shader* shader;
     float eyelevel;
     glm::vec3 input;

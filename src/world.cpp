@@ -2,7 +2,9 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
+#include <utility>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/norm.hpp>
 
 World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_manager(tm), player(p) {
 #ifndef UNIT_TEST
@@ -298,8 +300,19 @@ void World::prepare_rendering() {
 #ifdef UNIT_TEST
     return;
 #endif
-    visible_chunks.clear(); for(auto& kv : chunks) { if(player->check_in_frustum(kv.first)) visible_chunks.push_back(kv.second); }
-    std::sort(visible_chunks.begin(), visible_chunks.end(), [&](Chunk* a, Chunk* b){ return glm::distance(player->position, a->position) > glm::distance(player->position, b->position); });
+    visible_chunks.clear();
+    std::vector<std::pair<float, Chunk*>> candidates;
+    candidates.reserve(chunks.size());
+    glm::vec3 player_pos = player->position;
+    for(auto& kv : chunks) {
+        if(!player->check_in_frustum(kv.first)) continue;
+        glm::vec3 center = kv.second->position + glm::vec3(CHUNK_WIDTH * 0.5f, CHUNK_HEIGHT * 0.5f, CHUNK_LENGTH * 0.5f);
+        float dist2 = glm::length2(player_pos - center);
+        candidates.push_back({dist2, kv.second});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b){ return a.first > b.first; });
+    visible_chunks.reserve(candidates.size());
+    for (auto& c : candidates) visible_chunks.push_back(c.second);
 }
 void World::draw() {
 #ifdef UNIT_TEST
@@ -314,8 +327,12 @@ void World::draw_translucent() {
 #ifdef UNIT_TEST
     return;
 #endif
-    glDepthMask(GL_FALSE); glFrontFace(GL_CW); glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    glFrontFace(GL_CCW);
+    glEnable(GL_BLEND);
     for(auto* c : visible_chunks) c->draw_translucent(GL_TRIANGLES);
-    glFrontFace(GL_CCW); for(auto* c : visible_chunks) c->draw_translucent(GL_TRIANGLES);
-    glDisable(GL_BLEND); glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
+    glDepthMask(GL_TRUE);
 }
