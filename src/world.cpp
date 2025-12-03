@@ -5,6 +5,7 @@
 #include <utility>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/norm.hpp>
+#include <limits>
 
 World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_manager(tm), player(p) {
 #ifndef UNIT_TEST
@@ -154,8 +155,10 @@ void World::increase_light(glm::ivec3 pos, int val, bool update) {
     chunks[cp]->set_block_light(get_local_pos(glm::vec3(pos)), val);
     light_increase_queue.push_back({pos, val}); propagate_increase(update);
 }
-void World::propagate_increase(bool update) {
-    while(!light_increase_queue.empty()) {
+void World::propagate_increase(bool update, int max_steps) {
+    int steps_left = (max_steps < 0) ? Options::LIGHT_STEPS_PER_TICK : max_steps;
+    if (steps_left <= 0) steps_left = std::numeric_limits<int>::max();
+    while(!light_increase_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = light_increase_queue.front(); light_increase_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
             glm::ivec3 n = pos + d; glm::ivec3 cp = get_chunk_pos(glm::vec3(n));
@@ -173,8 +176,10 @@ void World::decrease_light(glm::ivec3 pos) {
     int old = get_light(pos); chunks[get_chunk_pos(glm::vec3(pos))]->set_block_light(get_local_pos(glm::vec3(pos)), 0);
     light_decrease_queue.push_back({pos, old}); propagate_decrease(true); propagate_increase(true);
 }
-void World::propagate_decrease(bool update) {
-    while(!light_decrease_queue.empty()) {
+void World::propagate_decrease(bool update, int max_steps) {
+    int steps_left = (max_steps < 0) ? Options::LIGHT_STEPS_PER_TICK : max_steps;
+    if (steps_left <= 0) steps_left = std::numeric_limits<int>::max();
+    while(!light_decrease_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = light_decrease_queue.front(); light_decrease_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
             glm::ivec3 n = pos + d; if(chunks.find(get_chunk_pos(glm::vec3(n))) == chunks.end()) continue;
@@ -247,8 +252,10 @@ void World::decrease_skylight(glm::ivec3 pos) {
     int old = get_skylight(pos); chunks[get_chunk_pos(glm::vec3(pos))]->set_sky_light(get_local_pos(glm::vec3(pos)), 0);
     skylight_decrease_queue.push_back({pos, old}); propagate_skylight_decrease(true); propagate_skylight_increase(true);
 }
-void World::propagate_skylight_increase(bool update) {
-    while(!skylight_increase_queue.empty()) {
+void World::propagate_skylight_increase(bool update, int max_steps) {
+    int steps_left = (max_steps < 0) ? Options::LIGHT_STEPS_PER_TICK : max_steps;
+    if (steps_left <= 0) steps_left = std::numeric_limits<int>::max();
+    while(!skylight_increase_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = skylight_increase_queue.front(); skylight_increase_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
             glm::ivec3 n = pos + d; if(n.y >= CHUNK_HEIGHT || n.y < 0) continue;
@@ -272,8 +279,10 @@ void World::propagate_skylight_increase(bool update) {
         }
     }
 }
-void World::propagate_skylight_decrease(bool update) {
-    while(!skylight_decrease_queue.empty()) {
+void World::propagate_skylight_decrease(bool update, int max_steps) {
+    int steps_left = (max_steps < 0) ? Options::LIGHT_STEPS_PER_TICK : max_steps;
+    if (steps_left <= 0) steps_left = std::numeric_limits<int>::max();
+    while(!skylight_decrease_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = skylight_decrease_queue.front(); skylight_decrease_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
             glm::ivec3 n = pos + d; if(chunks.find(get_chunk_pos(glm::vec3(n))) == chunks.end()) continue;
@@ -295,6 +304,10 @@ void World::tick(float dt) {
     if(time % 36000 == 0) incrementer = 1; if(time % 36000 == 18000) incrementer = -1; daylight += incrementer;
     if(!chunk_building_queue.empty()) { chunk_building_queue.front()->update_mesh(); chunk_building_queue.pop_front(); }
     for(auto* c : visible_chunks) c->process_chunk_updates();
+    propagate_increase(true);
+    propagate_decrease(true);
+    propagate_skylight_increase(true);
+    propagate_skylight_decrease(true);
 }
 void World::prepare_rendering() {
 #ifdef UNIT_TEST
@@ -328,11 +341,9 @@ void World::draw_translucent() {
     return;
 #endif
     glDepthMask(GL_FALSE);
-    glDisable(GL_CULL_FACE);
-    glFrontFace(GL_CCW);
+    glEnable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     for(auto* c : visible_chunks) c->draw_translucent(GL_TRIANGLES);
     glDisable(GL_BLEND);
-    glEnable(GL_CULL_FACE);
     glDepthMask(GL_TRUE);
 }

@@ -23,12 +23,10 @@ Chunk::Chunk(World* w, glm::ivec3 pos) : world(w), chunk_position(pos) {
     // Дадим драйверу минимум памяти, реальный размер будем выделять по факту в send_mesh_data_to_gpu
     glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_DYNAMIC_DRAW);
 
-    size_t stride = 9 * sizeof(float);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0); glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3*sizeof(float))); glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)(6*sizeof(float))); glEnableVertexAttribArray(2);
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, (void*)(7*sizeof(float))); glEnableVertexAttribArray(3);
-    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, stride, (void*)(8*sizeof(float))); glEnableVertexAttribArray(4);
+    size_t stride = 3 * sizeof(uint32_t);
+    glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, stride, (void*)0); glEnableVertexAttribArray(0);
+    glVertexAttribIPointer(1, 1, GL_UNSIGNED_INT, stride, (void*)(1*sizeof(uint32_t))); glEnableVertexAttribArray(1);
+    glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT, stride, (void*)(2*sizeof(uint32_t))); glEnableVertexAttribArray(2);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, world->ibo);
     shader_chunk_offset_loc = world->shader ? world->shader->find_uniform("u_ChunkPosition") : -1;
@@ -43,11 +41,83 @@ Chunk::~Chunk() {
     for(auto& kv : subchunks) delete kv.second;
 }
 
-int Chunk::get_block_light(glm::ivec3 pos) { return lightmap[pos.x][pos.y][pos.z] & 0xF; }
+int Chunk::get_block_light(glm::ivec3 pos) const { return lightmap[pos.x][pos.y][pos.z] & 0xF; }
 void Chunk::set_block_light(glm::ivec3 pos, int v) { lightmap[pos.x][pos.y][pos.z] = (lightmap[pos.x][pos.y][pos.z] & 0xF0) | v; }
-int Chunk::get_sky_light(glm::ivec3 pos) { return (lightmap[pos.x][pos.y][pos.z] >> 4) & 0xF; }
+int Chunk::get_sky_light(glm::ivec3 pos) const { return (lightmap[pos.x][pos.y][pos.z] >> 4) & 0xF; }
 void Chunk::set_sky_light(glm::ivec3 pos, int v) { lightmap[pos.x][pos.y][pos.z] = (lightmap[pos.x][pos.y][pos.z] & 0xF) | (v << 4); }
-uint8_t Chunk::get_raw_light(glm::ivec3 pos) { return lightmap[pos.x][pos.y][pos.z]; }
+uint8_t Chunk::get_raw_light(glm::ivec3 pos) const { return lightmap[pos.x][pos.y][pos.z]; }
+
+namespace {
+int get_neighbor_index(const glm::ivec3& diff) {
+    if (diff == Util::EAST) return 0;
+    if (diff == Util::WEST) return 1;
+    if (diff == Util::UP) return 2;
+    if (diff == Util::DOWN) return 3;
+    if (diff == Util::SOUTH) return 4;
+    if (diff == Util::NORTH) return 5;
+    return -1;
+}
+}
+
+int Chunk::get_block_number_cached(glm::ivec3 global_pos) const {
+    glm::ivec3 cp = world->get_chunk_pos(glm::vec3(global_pos));
+    glm::ivec3 diff = cp - chunk_position;
+
+    if (diff == glm::ivec3(0)) {
+        glm::ivec3 lp = world->get_local_pos(glm::vec3(global_pos));
+        return blocks[lp.x][lp.y][lp.z];
+    }
+
+    int idx = get_neighbor_index(diff);
+    if (idx != -1 && neighbors[idx]) {
+        glm::ivec3 lp = world->get_local_pos(glm::vec3(global_pos));
+        return neighbors[idx]->blocks[lp.x][lp.y][lp.z];
+    }
+
+    return world->get_block_number(global_pos);
+}
+
+int Chunk::get_light_cached(glm::ivec3 global_pos) const {
+    glm::ivec3 cp = world->get_chunk_pos(glm::vec3(global_pos));
+    glm::ivec3 diff = cp - chunk_position;
+
+    if (diff == glm::ivec3(0)) {
+        glm::ivec3 lp = world->get_local_pos(glm::vec3(global_pos));
+        return get_block_light(lp);
+    }
+
+    int idx = get_neighbor_index(diff);
+    if (idx != -1 && neighbors[idx]) {
+        glm::ivec3 lp = world->get_local_pos(glm::vec3(global_pos));
+        return neighbors[idx]->get_block_light(lp);
+    }
+
+    return world->get_light(global_pos);
+}
+
+int Chunk::get_skylight_cached(glm::ivec3 global_pos) const {
+    glm::ivec3 cp = world->get_chunk_pos(glm::vec3(global_pos));
+    glm::ivec3 diff = cp - chunk_position;
+
+    if (diff == glm::ivec3(0)) {
+        glm::ivec3 lp = world->get_local_pos(glm::vec3(global_pos));
+        return get_sky_light(lp);
+    }
+
+    int idx = get_neighbor_index(diff);
+    if (idx != -1 && neighbors[idx]) {
+        glm::ivec3 lp = world->get_local_pos(glm::vec3(global_pos));
+        return neighbors[idx]->get_sky_light(lp);
+    }
+
+    return world->get_skylight(global_pos);
+}
+
+bool Chunk::is_opaque_cached(glm::ivec3 global_pos) const {
+    int n = get_block_number_cached(global_pos);
+    if (!n) return false;
+    return !world->block_types[n]->transparent;
+}
 
 void Chunk::update_subchunk_meshes() {
     chunk_update_queue.clear();
@@ -115,8 +185,8 @@ void Chunk::update_mesh() {
         if(!kv.second->mesh.empty()) mesh.insert(mesh.end(), kv.second->mesh.begin(), kv.second->mesh.end());
         if(!kv.second->translucent_mesh.empty()) translucent_mesh.insert(translucent_mesh.end(), kv.second->translucent_mesh.begin(), kv.second->translucent_mesh.end());
     }
-    mesh_quad_count = mesh.size() / 36; // 9 floats * 4 vertices
-    translucent_quad_count = translucent_mesh.size() / 36;
+    mesh_quad_count = mesh.size() / 12; // 3 uint32 per vertex * 4 vertices
+    translucent_quad_count = translucent_mesh.size() / 12;
     send_mesh_data_to_gpu();
 }
 
@@ -124,16 +194,16 @@ void Chunk::send_mesh_data_to_gpu() {
 #ifdef UNIT_TEST
     return;
 #endif
-    size_t required_floats = mesh.size() + translucent_mesh.size();
-    if(!required_floats) { vbo_capacity = 0; return; }
+    size_t required_ints = mesh.size() + translucent_mesh.size();
+    if(!required_ints) { vbo_capacity = 0; return; }
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    if(required_floats != vbo_capacity) {
-        glBufferData(GL_ARRAY_BUFFER, sizeof(float)*required_floats, NULL, GL_DYNAMIC_DRAW);
-        vbo_capacity = required_floats;
+    if(required_ints != vbo_capacity) {
+        glBufferData(GL_ARRAY_BUFFER, sizeof(uint32_t)*required_ints, NULL, GL_DYNAMIC_DRAW);
+        vbo_capacity = required_ints;
     }
-    if(!mesh.empty()) glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(float)*mesh.size(), mesh.data());
-    if(!translucent_mesh.empty()) glBufferSubData(GL_ARRAY_BUFFER, sizeof(float)*mesh.size(), sizeof(float)*translucent_mesh.size(), translucent_mesh.data());
+    if(!mesh.empty()) glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(uint32_t)*mesh.size(), mesh.data());
+    if(!translucent_mesh.empty()) glBufferSubData(GL_ARRAY_BUFFER, sizeof(uint32_t)*mesh.size(), sizeof(uint32_t)*translucent_mesh.size(), translucent_mesh.data());
 }
 
 void Chunk::draw(GLenum mode) {

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 #include <cmath>
+#include <limits>
 
 namespace fs = std::filesystem;
 
@@ -28,6 +29,38 @@ int manhattan_distance_offset(const glm::ivec3& offset) { return std::abs(offset
 int ring_distance_offset(const glm::ivec3& offset) { return std::max(std::abs(offset.x), std::abs(offset.z)); }
 }
 
+bool Save::save_chunk(Chunk* chunk) {
+    if (!chunk) return false;
+
+    if (!fs::exists(path)) fs::create_directory(path);
+
+    int x = chunk->chunk_position.x;
+    int z = chunk->chunk_position.z;
+
+    int rx = x % 64; if(rx<0) rx+=64;
+    int rz = z % 64; if(rz<0) rz+=64;
+
+    std::string dir_path = path + "/" + to_base36(rx) + "/" + to_base36(rz);
+
+    if (!fs::exists(dir_path)) {
+        fs::create_directories(dir_path);
+    }
+
+    std::string filename = dir_path + "/c." + to_base36(x) + "." + to_base36(z) + ".dat";
+
+    bool success = NBT::write_blocks_to_gzip(
+        filename,
+        (const uint8_t*)chunk->blocks,
+        CHUNK_WIDTH, CHUNK_HEIGHT, CHUNK_LENGTH
+    );
+
+    if (success) {
+        chunk->modified = false;
+    }
+
+    return success;
+}
+
 void Save::save() {
     // Убедимся, что корневая папка существует
     if (!fs::exists(path)) fs::create_directory(path);
@@ -40,36 +73,10 @@ void Save::save() {
         // Сохраняем только если были изменения (или можно убрать проверку для принудительного сохранения)
         if(!c->modified) continue;
 
-        // Вычисляем путь к папке: save/1a/2b/
-        int x = kv.first.x;
-        int z = kv.first.z;
-
-        // Хеширование папок (mod 64)
-        int rx = x % 64; if(rx<0) rx+=64;
-        int rz = z % 64; if(rz<0) rz+=64;
-
-        std::string dir_path = path + "/" + to_base36(rx) + "/" + to_base36(rz);
-
-        // Создаем вложенные папки
-        if (!fs::exists(dir_path)) {
-            fs::create_directories(dir_path);
-        }
-
-        // Имя файла: c.base36(x).base36(z).dat
-        std::string filename = dir_path + "/c." + to_base36(x) + "." + to_base36(z) + ".dat";
-
-        // Сохраняем в формате NBT Gzip
-        bool success = NBT::write_blocks_to_gzip(
-            filename,
-            (const uint8_t*)c->blocks,
-            CHUNK_WIDTH, CHUNK_HEIGHT, CHUNK_LENGTH
-        );
-
-        if (success) {
-            c->modified = false;
+        if (save_chunk(c)) {
             saved_count++;
         } else {
-            std::cout << "Failed to save chunk: " << x << ", " << z << std::endl;
+            std::cout << "Failed to save chunk: " << kv.first.x << ", " << kv.first.z << std::endl;
         }
     }
     std::cout << "Saved " << saved_count << " chunks." << std::endl;
@@ -80,6 +87,16 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
 
     Chunk* c = new Chunk(world, chunk_pos);
     world->chunks[chunk_pos] = c;
+
+    // Link neighbor pointers for fast access.
+    static const int OPPOSITE[6] = {1, 0, 3, 2, 5, 4};
+    for (int i = 0; i < 6; i++) {
+        glm::ivec3 npos = chunk_pos + Util::DIRECTIONS[i];
+        auto it = world->chunks.find(npos);
+        Chunk* n = (it != world->chunks.end()) ? it->second : nullptr;
+        c->neighbors[i] = n;
+        if (n) n->neighbors[OPPOSITE[i]] = c;
+    }
     bool loaded = false;
 
     // Пробуем загрузить из структурированной папки (NBT)
@@ -137,10 +154,26 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
         }
     }
 
-    world->propagate_skylight_increase(false);
-    world->propagate_increase(false);
+    world->propagate_skylight_increase(false, std::numeric_limits<int>::max());
+    world->propagate_increase(false, std::numeric_limits<int>::max());
 
     c->update_subchunk_meshes();
+
+    // Update neighbor meshes so shared faces get correct lighting.
+    auto update_neighbor = [&](glm::ivec3 offset) {
+        glm::ivec3 n_pos = c->chunk_position + offset;
+        auto it = world->chunks.find(n_pos);
+        if (it == world->chunks.end()) return;
+        Chunk* neighbor = it->second;
+        neighbor->modified = true;
+        neighbor->update_subchunk_meshes();
+    };
+
+    update_neighbor(Util::EAST);
+    update_neighbor(Util::WEST);
+    update_neighbor(Util::NORTH);
+    update_neighbor(Util::SOUTH);
+
     return true;
 }
 
@@ -187,6 +220,70 @@ void Save::load(int initial_radius) {
     }
 
     std::cout << "Loaded " << loaded_now << " chunks upfront, queued " << pending_chunks.size() << " for streaming." << std::endl;
+}
+
+void Save::update_streaming(glm::vec3 player_pos) {
+    glm::ivec3 current_center = world->get_chunk_pos(player_pos);
+
+    // No-op if player stays in the same chunk.
+    if (current_center == last_center_chunk) return;
+
+    last_center_chunk = current_center;
+    int radius = Options::RENDER_DISTANCE;
+
+    // --- QUEUE GENERATION AROUND PLAYER ---
+    for (int x = -radius; x <= radius; x++) {
+        for (int z = -radius; z <= radius; z++) {
+            if (x * x + z * z > radius * radius) continue;
+
+            glm::ivec3 chunk_pos = current_center + glm::ivec3(x, 0, z);
+
+            // Skip if chunk already exists.
+            if (world->chunks.find(chunk_pos) != world->chunks.end()) continue;
+
+            // Avoid duplicates in pending queue.
+            bool already_queued = false;
+            for (const auto& p : pending_chunks) {
+                if (p == chunk_pos) { already_queued = true; break; }
+            }
+            if (!already_queued) pending_chunks.push_back(chunk_pos);
+        }
+    }
+
+    // --- UNLOAD FAR CHUNKS ---
+    const int unload_dist_sq = (radius + 3) * (radius + 3);
+
+    for (auto it = world->chunks.begin(); it != world->chunks.end(); ) {
+        glm::ivec3 pos = it->first;
+        Chunk* c = it->second;
+
+        int dx = pos.x - current_center.x;
+        int dz = pos.z - current_center.z;
+        int dist_sq = dx * dx + dz * dz;
+
+        if (dist_sq > unload_dist_sq) {
+            if (c->modified) {
+                save_chunk(c);
+            }
+
+            static const int OPPOSITE[6] = {1, 0, 3, 2, 5, 4};
+            for (int i = 0; i < 6; i++) {
+                Chunk* n = c->neighbors[i];
+                if (n) n->neighbors[OPPOSITE[i]] = nullptr;
+            }
+
+            auto& visible = world->visible_chunks;
+            visible.erase(std::remove(visible.begin(), visible.end(), c), visible.end());
+
+            auto& build_queue = world->chunk_building_queue;
+            build_queue.erase(std::remove(build_queue.begin(), build_queue.end(), c), build_queue.end());
+
+            delete c;
+            it = world->chunks.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void Save::stream_next(int max_chunks) {

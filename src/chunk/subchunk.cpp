@@ -3,6 +3,40 @@
 #include "../world.h"
 #include "../options.h"
 #include <algorithm>
+#include <cmath>
+
+namespace {
+inline int16_t pack_pos_component(float v) {
+    int val = static_cast<int>(std::round(v * 16.0f));
+    val = std::clamp(val, -32768, 32767);
+    return static_cast<int16_t>(val);
+}
+
+inline uint8_t pack_uv(float v) {
+    int val = static_cast<int>(std::round(v * 255.0f));
+    return static_cast<uint8_t>(std::clamp(val, 0, 255));
+}
+
+inline uint8_t pack_shading(float v) {
+    int val = static_cast<int>(std::round(v * 255.0f));
+    return static_cast<uint8_t>(std::clamp(val, 0, 255));
+}
+
+inline uint32_t pack_pos_xy(int16_t x, int16_t y) {
+    return static_cast<uint16_t>(x) | (static_cast<uint32_t>(static_cast<uint16_t>(y)) << 16);
+}
+
+inline uint32_t pack_pos_z_uv(int16_t z, uint8_t u, uint8_t v) {
+    return static_cast<uint16_t>(z) | (static_cast<uint32_t>(u) << 16) | (static_cast<uint32_t>(v) << 24);
+}
+
+inline uint32_t pack_attr(uint8_t layer, uint8_t shading, uint8_t blocklight, uint8_t skylight) {
+    return static_cast<uint32_t>(layer) |
+           (static_cast<uint32_t>(shading) << 8) |
+           (static_cast<uint32_t>(blocklight & 0xF) << 16) |
+           (static_cast<uint32_t>(skylight & 0xF) << 20);
+}
+}
 
 Subchunk::Subchunk(Chunk* p, glm::ivec3 pos) : parent(p), world(p->world), subchunk_position(pos) {
     local_position = pos * glm::ivec3(SUBCHUNK_WIDTH, SUBCHUNK_HEIGHT, SUBCHUNK_LENGTH);
@@ -63,7 +97,7 @@ std::vector<float> Subchunk::get_light(int block, int face, glm::ivec3 pos, glm:
     BlockType& bt = *world->block_types[block];
     if (!bt.is_cube) {
         // ДЛЯ НЕПОЛНЫХ БЛОКОВ БЕРЕМ СВЕТ ИЗ ТЕКУЩЕЙ ПОЗИЦИИ (pos), А НЕ ИЗ СОСЕДА (npos)
-        return std::vector<float>(4, (float)world->get_light(pos));
+        return std::vector<float>(4, (float)parent->get_light_cached(pos));
     }
 
     // Determine if model is complex (e.g. Crop, Plant)
@@ -71,34 +105,34 @@ std::vector<float> Subchunk::get_light(int block, int face, glm::ivec3 pos, glm:
     // Complex models take light from their own position to avoid black spots
     glm::ivec3 target_pos = complex_model ? pos : npos;
 
-    if (!Options::SMOOTH_LIGHTING) return std::vector<float>(4, (float)world->get_light(target_pos));
+    if (!Options::SMOOTH_LIGHTING) return std::vector<float>(4, (float)parent->get_light_cached(target_pos));
 
     // Skip smooth lighting for complex models
-    if (complex_model) return std::vector<float>(4, (float)world->get_light(target_pos));
+    if (complex_model) return std::vector<float>(4, (float)parent->get_light_cached(target_pos));
 
     std::vector<glm::ivec3> neighbors = get_neighbour_voxels(target_pos, face);
-    float l = world->get_light(target_pos);
-    return get_smooth_face_light(l, world->get_light(neighbors[0]), world->get_light(neighbors[1]), world->get_light(neighbors[2]),
-                                 world->get_light(neighbors[3]), world->get_light(neighbors[4]),
-                                 world->get_light(neighbors[5]), world->get_light(neighbors[6]), world->get_light(neighbors[7]));
+    float l = parent->get_light_cached(target_pos);
+    return get_smooth_face_light(l, parent->get_light_cached(neighbors[0]), parent->get_light_cached(neighbors[1]), parent->get_light_cached(neighbors[2]),
+                                 parent->get_light_cached(neighbors[3]), parent->get_light_cached(neighbors[4]),
+                                 parent->get_light_cached(neighbors[5]), parent->get_light_cached(neighbors[6]), parent->get_light_cached(neighbors[7]));
 }
 
 std::vector<float> Subchunk::get_skylight(int block, int face, glm::ivec3 pos, glm::ivec3 npos) {
     BlockType& bt = *world->block_types[block];
     // ИСПРАВЛЕНИЕ: Аналогично для Skylight
     if (!bt.is_cube) {
-        return std::vector<float>(4, (float)world->get_skylight(pos));
+        return std::vector<float>(4, (float)parent->get_skylight_cached(pos));
     }
 
     // FIX: Аналогично для SkyLight. Slab теперь будет получать мягкое освещение.
-    if (!Options::SMOOTH_LIGHTING) return std::vector<float>(4, (float)world->get_skylight(npos));
+    if (!Options::SMOOTH_LIGHTING) return std::vector<float>(4, (float)parent->get_skylight_cached(npos));
     std::vector<glm::ivec3> neighbors = get_neighbour_voxels(npos, face);
-    if (neighbors.size() < 8) return std::vector<float>(4, (float)world->get_skylight(npos));
+    if (neighbors.size() < 8) return std::vector<float>(4, (float)parent->get_skylight_cached(npos));
 
-    float l = world->get_skylight(npos);
-    return get_smooth_face_light(l, world->get_skylight(neighbors[0]), world->get_skylight(neighbors[1]), world->get_skylight(neighbors[2]),
-                                 world->get_skylight(neighbors[3]), world->get_skylight(neighbors[4]),
-                                 world->get_skylight(neighbors[5]), world->get_skylight(neighbors[6]), world->get_skylight(neighbors[7]));
+    float l = parent->get_skylight_cached(npos);
+    return get_smooth_face_light(l, parent->get_skylight_cached(neighbors[0]), parent->get_skylight_cached(neighbors[1]), parent->get_skylight_cached(neighbors[2]),
+                                 parent->get_skylight_cached(neighbors[3]), parent->get_skylight_cached(neighbors[4]),
+                                 parent->get_skylight_cached(neighbors[5]), parent->get_skylight_cached(neighbors[6]), parent->get_skylight_cached(neighbors[7]));
 }
 
 std::vector<float> Subchunk::get_shading(int block, BlockType& bt, int face, glm::ivec3 npos) {
@@ -110,9 +144,9 @@ std::vector<float> Subchunk::get_shading(int block, BlockType& bt, int face, glm
     std::vector<glm::ivec3> neighbors = get_neighbour_voxels(npos, face);
     if (neighbors.size() < 8) return bt.shading_values[face];
 
-    return get_face_ao(world->is_opaque_block(neighbors[0]), world->is_opaque_block(neighbors[1]), world->is_opaque_block(neighbors[2]),
-                       world->is_opaque_block(neighbors[3]), world->is_opaque_block(neighbors[4]),
-                       world->is_opaque_block(neighbors[5]), world->is_opaque_block(neighbors[6]), world->is_opaque_block(neighbors[7]));
+    return get_face_ao(parent->is_opaque_cached(neighbors[0]), parent->is_opaque_cached(neighbors[1]), parent->is_opaque_cached(neighbors[2]),
+                       parent->is_opaque_cached(neighbors[3]), parent->is_opaque_cached(neighbors[4]),
+                       parent->is_opaque_cached(neighbors[5]), parent->is_opaque_cached(neighbors[6]), parent->is_opaque_cached(neighbors[7]));
 }
 
 void Subchunk::add_face(int face, glm::ivec3 pos, glm::ivec3 lpos, int block, BlockType& bt, glm::ivec3 npos) {
@@ -121,28 +155,31 @@ void Subchunk::add_face(int face, glm::ivec3 pos, glm::ivec3 lpos, int block, Bl
     std::vector<float> lights = get_light(block, face, pos, npos);
     std::vector<float> skylights = get_skylight(block, face, pos, npos);
 
-    // Проверка на наличие UV в модели (на всякий случай)
     bool has_uv = (face < bt.tex_coords.size());
 
     for(int i=0; i<4; i++) {
-        // Позиция
-        target.push_back(bt.vertex_positions[face][i*3+0] + lpos.x);
-        target.push_back(bt.vertex_positions[face][i*3+1] + lpos.y);
-        target.push_back(bt.vertex_positions[face][i*3+2] + lpos.z);
+        float vx = bt.vertex_positions[face][i*3+0] + lpos.x;
+        float vy = bt.vertex_positions[face][i*3+1] + lpos.y;
+        float vz = bt.vertex_positions[face][i*3+2] + lpos.z;
 
-        // === ИЗМЕНЕНО: Берем UV из модели ===
+        uint8_t u = 0, v = 0;
         if (has_uv) {
-            target.push_back(bt.tex_coords[face][i*2+0]); // U
-            target.push_back(bt.tex_coords[face][i*2+1]); // V
-        } else {
-            target.push_back(0.0f); target.push_back(0.0f); // Fallback
+            u = pack_uv(bt.tex_coords[face][i*2+0]);
+            v = pack_uv(bt.tex_coords[face][i*2+1]);
         }
 
-        target.push_back((float)bt.tex_indices[face]); // Layer
+        uint8_t layer = static_cast<uint8_t>(bt.tex_indices[face]);
+        uint8_t shade = pack_shading(shading[i]);
+        uint8_t bl = static_cast<uint8_t>(std::clamp<int>(static_cast<int>(lights[i]), 0, 15));
+        uint8_t sl = static_cast<uint8_t>(std::clamp<int>(static_cast<int>(skylights[i]), 0, 15));
 
-        target.push_back(shading[i]);
-        target.push_back(lights[i]);
-        target.push_back(skylights[i]);
+        int16_t px = pack_pos_component(vx);
+        int16_t py = pack_pos_component(vy);
+        int16_t pz = pack_pos_component(vz);
+
+        target.push_back(pack_pos_xy(px, py));
+        target.push_back(pack_pos_z_uv(pz, u, v));
+        target.push_back(pack_attr(layer, shade, bl, sl));
     }
 }
 
@@ -154,7 +191,7 @@ bool Subchunk::can_render_face(BlockType& bt, int block_number, glm::ivec3 posit
     // Возвращаем true, если нужно рисовать.
 
     // Получаем номер соседнего блока
-    int neighbor_id = world->get_block_number(position);
+    int neighbor_id = parent->get_block_number_cached(position);
 
     // Если сосед - воздух (0), рисуем
     if (neighbor_id == 0) return true;

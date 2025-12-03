@@ -15,4 +15,5 @@ namespace Options {
     inline int MIPMAP_TYPE = GL_NEAREST_MIPMAP_LINEAR;
     inline bool COLORED_LIGHTING = true;
     inline int ANTIALIASING = 0;
+    inline int LIGHT_STEPS_PER_TICK = 2048;
 }

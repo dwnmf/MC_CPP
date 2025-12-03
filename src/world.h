@@ -65,10 +65,10 @@ public:
     glm::ivec3 get_chunk_pos(glm::vec3 pos);
     glm::ivec3 get_local_pos(glm::vec3 pos);
 
-    void propagate_increase(bool update);
-    void propagate_decrease(bool update);
-    void propagate_skylight_increase(bool update);
-    void propagate_skylight_decrease(bool update);
+    void propagate_increase(bool update, int max_steps = -1);
+    void propagate_decrease(bool update, int max_steps = -1);
+    void propagate_skylight_increase(bool update, int max_steps = -1);
+    void propagate_skylight_decrease(bool update, int max_steps = -1);
 
     void prepare_rendering();
     void speed_daytime();

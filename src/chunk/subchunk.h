@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include "../util.h"
 #include "../renderer/block_type.h"
@@ -7,9 +8,9 @@
 class Chunk;
 class World;
 
-const int SUBCHUNK_WIDTH = 4;
-const int SUBCHUNK_HEIGHT = 4;
-const int SUBCHUNK_LENGTH = 4;
+const int SUBCHUNK_WIDTH = 16;
+const int SUBCHUNK_HEIGHT = 16;
+const int SUBCHUNK_LENGTH = 16;
 
 class Subchunk {
 public:
@@ -19,8 +20,8 @@ public:
     glm::ivec3 local_position;
     glm::vec3 position;
 
-    std::vector<float> mesh;
-    std::vector<float> translucent_mesh;
+    std::vector<uint32_t> mesh;
+    std::vector<uint32_t> translucent_mesh;
 
     Subchunk(Chunk* p, glm::ivec3 pos);
     void update_mesh();

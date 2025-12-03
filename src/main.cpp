@@ -457,7 +457,10 @@ int main() {
         lastTime = now;
 
         Audio::Update(limit); // Обновление музыки
-        if (world.save_system) world.save_system->stream_next(1); // Постепенно подгружаем чанки без длинного старта
+        if (world.save_system) {
+            world.save_system->update_streaming(player.position);
+            world.save_system->stream_next(1); // Постепенно подгружаем чанки без длинного старта
+        }
 
         while (delta >= 1.0) {
             player.input = glm::vec3(0);
