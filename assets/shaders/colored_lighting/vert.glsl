@@ -40,11 +40,14 @@ void main(void) {
 	v_TexCoords = vec3(u, v, layer);
 
 	float blocklightMultiplier = pow(0.8, 15.0 - a_Light);
-	float skylightMultiplier = pow(0.8, 15.0 - a_Skylight);
+	float skylightMultiplier = (a_Skylight > 0.0)
+		? pow(0.8, 15.0 - a_Skylight)
+		: 0.0;
+	float skyLight = skylightMultiplier * u_Daylight;
 
 	v_Light = vec3(
-		clamp(blocklightMultiplier * 1.5, skylightMultiplier * u_Daylight, 1.0),
-		clamp(blocklightMultiplier * 1.25, skylightMultiplier * u_Daylight, 1.0),
+		clamp(blocklightMultiplier * 1.5, skyLight, 1.0),
+		clamp(blocklightMultiplier * 1.25, skyLight, 1.0),
 		clamp(skylightMultiplier * (2.0 - pow(u_Daylight, 2)), blocklightMultiplier, 1.0)
 	) * shading;
 

@@ -138,10 +138,13 @@ int World::get_light(glm::ivec3 pos) {
     return chunks[cp]->get_block_light(get_local_pos(glm::vec3(pos)));
 }
 int World::get_skylight(glm::ivec3 pos) {
+    if (pos.y < 0) return 0;
+    if (pos.y >= CHUNK_HEIGHT) return 15;
     glm::ivec3 cp = get_chunk_pos(glm::vec3(pos));
-    // IMPORTANT: If chunk doesn't exist, it's open sky -> return 15
-    if(chunks.find(cp)==chunks.end()) return 15;
-    return chunks[cp]->get_sky_light(get_local_pos(glm::vec3(pos)));
+    auto it = chunks.find(cp);
+    // Treat missing chunks as dark to avoid leaking skylight through unloaded neighbors
+    if (it == chunks.end()) return 0;
+    return it->second->get_sky_light(get_local_pos(glm::vec3(pos)));
 }
 bool World::is_opaque_block(glm::ivec3 pos) {
     int n = get_block_number(pos); if(!n) return false; return !block_types[n]->transparent;
