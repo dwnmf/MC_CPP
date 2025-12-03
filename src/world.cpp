@@ -58,7 +58,7 @@ void World::set_block(glm::ivec3 pos, int number) {
     c->update_at_position(lp);
 
     bool now_opaque = (number != 0 && !block_types[number]->transparent);
-    bool is_source = (number != 0 && std::find(light_blocks.begin(), light_blocks.end(), number) != light_blocks.end());
+    bool is_source = (number != 0 && light_blocks.find(number) != light_blocks.end());
 
     // 1. Block Light
     if (is_source) {

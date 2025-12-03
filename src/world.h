@@ -2,6 +2,7 @@
 #include <vector>
 #include <deque>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <glm/glm.hpp>
 #include "chunk/chunk.h"
@@ -28,7 +29,7 @@ public:
     std::deque<std::pair<glm::ivec3, int>> skylight_decrease_queue;
     std::deque<Chunk*> chunk_building_queue;
 
-    std::vector<int> light_blocks = {10, 11, 50, 51, 62, 75};
+    std::unordered_set<int> light_blocks = {10, 11, 50, 51, 62, 75};
 
     float daylight = 1800;
     int incrementer = 0;

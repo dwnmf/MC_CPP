@@ -65,6 +65,10 @@ add_executable(mc_tests ${TEST_SOURCES} tests/tests_main.cpp)
 target_compile_definitions(mc_tests PRIVATE UNIT_TEST)
 target_link_libraries(mc_tests PRIVATE glfw glad zlib)
 
+add_executable(mc_bench ${TEST_SOURCES} tests/perf_hotspots.cpp)
+target_compile_definitions(mc_bench PRIVATE UNIT_TEST)
+target_link_libraries(mc_bench PRIVATE glfw glad zlib)
+
 # Присоединяем (линкуем) библиотеки
 target_link_libraries(${PROJECT_NAME} PRIVATE glfw glad zlib)
 
