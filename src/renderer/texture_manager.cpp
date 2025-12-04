@@ -23,6 +23,7 @@ TextureManager::TextureManager(int w, int h, int max_tex) : texture_width(w), te
 
 void TextureManager::generate_mipmaps() {
 #ifndef UNIT_TEST
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture_array);
     glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
 #endif
 }
@@ -39,6 +40,8 @@ void TextureManager::add_texture(std::string texture) {
     int width, height, nrChannels;
     unsigned char *data = stbi_load(path.c_str(), &width, &height, &nrChannels, 4);
     if (data) {
+        glBindTexture(GL_TEXTURE_2D_ARRAY, texture_array);
+        std::cout << "Loading texture " << path << " (" << width << "x" << height << ", channels=" << nrChannels << ") into layer " << index << std::endl;
         glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, index, width, height, 1, GL_RGBA, GL_UNSIGNED_BYTE, data);
         stbi_image_free(data);
     } else {

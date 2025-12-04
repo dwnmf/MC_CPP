@@ -23,6 +23,7 @@ public:
     glm::vec3 interpolated_position;
 
     Player(World* w, Shader* s, float vw, float vh);
+    float get_current_fov() const;
     void update(float dt) override;
     void update_matrices(float partial_ticks); // Interpolation
     bool check_in_frustum(glm::ivec3 chunk_pos);

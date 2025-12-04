@@ -5,6 +5,7 @@
 
 uniform ivec2 u_ChunkPosition;
 uniform mat4 u_MVPMatrix;
+uniform mat4 u_ViewMatrix;
 uniform float u_Daylight;
 
 layout(location = 0) in uint a_Data0;
@@ -14,6 +15,7 @@ layout(location = 2) in uint a_Data2;
 out vec3 v_Position;
 out vec3 v_TexCoords;
 out vec3 v_Light;
+out float v_ViewDepth;
 
 int decode_signed16(uint v) {
 	return int(int(v << 16) >> 16);
@@ -56,6 +58,9 @@ void main(void) {
 	light = min(light, vec3(1.0));
 
 	v_Light = light * shading;
+
+	vec4 viewPos = u_ViewMatrix * vec4(v_Position, 1.0);
+	v_ViewDepth = -viewPos.z;
 
 	gl_Position = u_MVPMatrix * vec4(v_Position, 1.0);
 }

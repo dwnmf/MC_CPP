@@ -18,7 +18,7 @@ namespace Options {
     inline int LIGHT_STEPS_PER_TICK = 2048;
 
     // Shadow mapping (CSM)
-    inline bool SHADOWS_ENABLED = false;
+    inline bool SHADOWS_ENABLED = true;
     inline int SHADOW_MAP_RESOLUTION = 2048;
     inline int SHADOW_CASCADES = 4;
     inline float SHADOW_LOG_WEIGHT = 0.85f;

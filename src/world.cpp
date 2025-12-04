@@ -8,10 +8,19 @@
 #include <limits>
 #include <cmath>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_manager(tm), player(p) {
 #ifndef UNIT_TEST
-    shader_daylight_loc = shader ? shader->find_uniform("u_Daylight") : -1;
+    shader_daylight_loc = -1;
+    if (shader && shader->valid()) {
+        shader->use();
+        shader_daylight_loc = shader->find_uniform("u_Daylight");
+        // Ensure shadows are disabled in the main shader by default
+        shader_cascade_count_loc = shader->find_uniform("u_ShadowCascadeCount");
+        if (shader_cascade_count_loc >= 0) shader->setInt(shader_cascade_count_loc, 0);
+    }
+
     std::vector<unsigned int> indices;
     for (int i=0; i<CHUNK_WIDTH*CHUNK_HEIGHT*CHUNK_LENGTH*8; i++) {
         indices.insert(indices.end(), {4u*i, 4u*i+1, 4u*i+2, 4u*i+2, 4u*i+3, 4u*i});
@@ -19,6 +28,13 @@ World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_mana
     glGenBuffers(1, &ibo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size()*sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    shadows_enabled = Options::SHADOWS_ENABLED;
+    if (shadows_enabled && shader && shader->valid() && texture_manager) {
+        if (!init_shadow_resources()) {
+            shadows_enabled = false;
+        }
+    }
 #endif
 }
 World::~World() {
@@ -27,6 +43,11 @@ World::~World() {
 #endif
     for(auto& kv : chunks) delete kv.second;
     if(save_system) delete save_system;
+#ifndef UNIT_TEST
+    if (shadow_fbo) glDeleteFramebuffers(1, &shadow_fbo);
+    if (shadow_map) glDeleteTextures(1, &shadow_map);
+    if (shadow_shader) delete shadow_shader;
+#endif
 }
 glm::ivec3 World::get_chunk_pos(glm::vec3 pos) { return glm::ivec3(floor(pos.x/16), floor(pos.y/128), floor(pos.z/16)); }
 glm::ivec3 World::get_local_pos(glm::vec3 pos) {
@@ -406,13 +427,236 @@ void World::prepare_rendering() {
     visible_chunks.reserve(candidates.size());
     for (auto& c : candidates) visible_chunks.push_back(c.second);
 }
+
+bool World::init_shadow_resources() {
+#ifdef UNIT_TEST
+    return false;
+#endif
+    shadow_map_resolution = Options::SHADOW_MAP_RESOLUTION;
+    shadow_cascade_count = std::max(1, std::min(Options::SHADOW_CASCADES, 4));
+
+    if (shadow_map_resolution <= 0 || shadow_cascade_count <= 0) return false;
+
+    shadow_matrices.resize(shadow_cascade_count);
+    shadow_splits.resize(shadow_cascade_count);
+
+    shadow_shader = new Shader("assets/shaders/shadow/vert.glsl", "assets/shaders/shadow/frag.glsl");
+    if (!shadow_shader->valid()) {
+        delete shadow_shader;
+        shadow_shader = nullptr;
+        std::cout << "ERROR::SHADOW:: Failed to load shadow shader." << std::endl;
+        return false;
+    }
+
+    glGenFramebuffers(1, &shadow_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo);
+
+    glGenTextures(1, &shadow_map);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, shadow_map);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24,
+                 shadow_map_resolution, shadow_map_resolution, shadow_cascade_count,
+                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, shadow_map, 0, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cout << "ERROR::SHADOW:: Framebuffer is not complete!" << std::endl;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, &shadow_fbo); shadow_fbo = 0;
+        glDeleteTextures(1, &shadow_map); shadow_map = 0;
+        delete shadow_shader; shadow_shader = nullptr;
+        return false;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Cache uniform locations on the main shader
+    if (shader && shader->valid()) {
+        shader_shadow_map_loc = shader->find_uniform("u_ShadowMap");
+        shader_light_space_mats_loc = shader->find_uniform("u_LightSpaceMatrices[0]");
+        shader_cascade_splits_loc = shader->find_uniform("u_CascadeSplits");
+        shader_cascade_count_loc = shader->find_uniform("u_ShadowCascadeCount");
+        shader_shadow_texel_size_loc = shader->find_uniform("u_ShadowTexelSize");
+        shader_shadow_min_bias_loc = shader->find_uniform("u_ShadowMinBias");
+        shader_shadow_slope_bias_loc = shader->find_uniform("u_ShadowSlopeBias");
+        shader_shadow_pcf_radius_loc = shader->find_uniform("u_ShadowPCFRadius");
+    }
+
+    return true;
+}
+
+void World::update_shadow_cascades() {
+#ifdef UNIT_TEST
+    return;
+#endif
+    if (!shadows_enabled || !shadow_shader || !player) return;
+    if (shadow_cascade_count <= 0) return;
+
+    float near_plane = player->near_plane;
+    float far_plane = player->far_plane;
+    if (near_plane <= 0.0f || far_plane <= near_plane) return;
+
+    float aspect = (player->view_height > 0.0f) ? (player->view_width / player->view_height) : 1.0f;
+    float fov_rad = glm::radians(player->get_current_fov());
+    float tanHalfFovY = std::tan(fov_rad * 0.5f);
+    float tanHalfFovX = tanHalfFovY * aspect;
+
+    float n = near_plane;
+    float f = far_plane;
+    float lambda = std::clamp(Options::SHADOW_LOG_WEIGHT, 0.0f, 1.0f);
+
+    for (int i = 0; i < shadow_cascade_count; ++i) {
+        float p = (i + 1) / static_cast<float>(shadow_cascade_count);
+        float logSplit = n * std::pow(f / n, p);
+        float linSplit = n + (f - n) * p;
+        float splitDist = lambda * logSplit + (1.0f - lambda) * linSplit;
+        shadow_splits[i] = splitDist;
+    }
+
+    glm::mat4 invView = glm::inverse(player->mv_matrix);
+    glm::vec3 lightDir = glm::normalize(get_light_direction());
+
+    for (int i = 0; i < shadow_cascade_count; ++i) {
+        float prevSplit = (i == 0) ? near_plane : shadow_splits[i - 1];
+        float splitDist = shadow_splits[i];
+
+        float xn = prevSplit * tanHalfFovX;
+        float yn = prevSplit * tanHalfFovY;
+        float xf = splitDist * tanHalfFovX;
+        float yf = splitDist * tanHalfFovY;
+
+        glm::vec3 cornersView[8] = {
+            { -xn,  yn, -prevSplit },
+            {  xn,  yn, -prevSplit },
+            { -xn, -yn, -prevSplit },
+            {  xn, -yn, -prevSplit },
+            { -xf,  yf, -splitDist },
+            {  xf,  yf, -splitDist },
+            { -xf, -yf, -splitDist },
+            {  xf, -yf, -splitDist }
+        };
+
+        glm::vec3 cornersWorld[8];
+        glm::vec3 center(0.0f);
+        for (int c = 0; c < 8; ++c) {
+            glm::vec4 worldPos = invView * glm::vec4(cornersView[c], 1.0f);
+            cornersWorld[c] = glm::vec3(worldPos);
+            center += cornersWorld[c];
+        }
+        center /= 8.0f;
+
+        float radius = 0.0f;
+        for (int c = 0; c < 8; ++c) {
+            radius = std::max(radius, glm::length(cornersWorld[c] - center));
+        }
+        radius = std::max(radius, 1.0f);
+        radius = std::ceil(radius * 16.0f) / 16.0f;
+
+        glm::vec3 lightPos = center - lightDir * (radius * 2.0f);
+        glm::mat4 lightView = glm::lookAt(lightPos, center, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        float zNear = 0.1f;
+        float zFar = radius * 4.0f;
+        glm::mat4 lightProj = glm::ortho(-radius, radius, -radius, radius, zNear, zFar);
+
+        shadow_matrices[i] = lightProj * lightView;
+    }
+}
+
+void World::render_shadows() {
+#ifdef UNIT_TEST
+    return;
+#endif
+    if (!shadows_enabled || !shadow_shader || !texture_manager) return;
+    if (shadow_cascade_count <= 0) return;
+    if (visible_chunks.empty()) return;
+
+    update_shadow_cascades();
+
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    GLint prevDrawBuffer = GL_BACK;
+    GLint prevReadBuffer = GL_BACK;
+    glGetIntegerv(GL_DRAW_BUFFER, &prevDrawBuffer);
+    glGetIntegerv(GL_READ_BUFFER, &prevReadBuffer);
+
+    glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
+    glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+
+    glEnable(GL_DEPTH_TEST);
+    glCullFace(GL_BACK);
+
+    shadow_shader->use();
+    int chunkLoc = shadow_shader->find_uniform("u_ChunkPosition");
+    int lightSpaceLoc = shadow_shader->find_uniform("u_LightSpaceMatrix");
+    int samplerLoc = shadow_shader->find_uniform("u_TextureArraySampler");
+    if (samplerLoc >= 0) shadow_shader->setInt(samplerLoc, 0);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture_manager->texture_array);
+
+    for (int i = 0; i < shadow_cascade_count; ++i) {
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, shadow_map, 0, i);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        if (lightSpaceLoc >= 0) shadow_shader->setMat4(lightSpaceLoc, shadow_matrices[i]);
+
+        for (auto* c : visible_chunks) {
+            c->draw(GL_TRIANGLES, shadow_shader, chunkLoc);
+        }
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDrawBuffer(prevDrawBuffer);
+    glReadBuffer(prevReadBuffer);
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+}
+
 void World::draw() {
 #ifdef UNIT_TEST
     return;
 #endif
     float dm = get_daylight_factor();
     glClearColor(0.5f * (dm-0.26f), 0.8f*(dm-0.26f), (dm-0.26f)*1.36f, 1.0f);
-    shader->setFloat(shader_daylight_loc, dm); glEnable(GL_CULL_FACE);
+    if (shader && shader->valid()) {
+        shader->use();
+        shader->setFloat(shader_daylight_loc, dm);
+        // Гарантируем, что сэмплер текстур мира всегда указывает на GL_TEXTURE0
+        int texLoc = shader->find_uniform("u_TextureArraySampler");
+        if (texLoc >= 0) shader->setInt(texLoc, 0);
+
+        if (shadows_enabled && shadow_map && shadow_cascade_count > 0) {
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D_ARRAY, shadow_map);
+
+            if (shader_shadow_map_loc >= 0) shader->setInt(shader_shadow_map_loc, 1);
+            if (shader_light_space_mats_loc >= 0) shader->setMat4Array(shader_light_space_mats_loc, shadow_matrices);
+            if (shader_cascade_splits_loc >= 0) shader->setFloatArray(shader_cascade_splits_loc, shadow_splits);
+            if (shader_cascade_count_loc >= 0) shader->setInt(shader_cascade_count_loc, shadow_cascade_count);
+            if (shader_shadow_texel_size_loc >= 0 && shadow_map_resolution > 0) {
+                glm::vec2 texelSize(1.0f / static_cast<float>(shadow_map_resolution),
+                                    1.0f / static_cast<float>(shadow_map_resolution));
+                shader->setVec2(shader_shadow_texel_size_loc, texelSize);
+            }
+            if (shader_shadow_min_bias_loc >= 0) shader->setFloat(shader_shadow_min_bias_loc, Options::SHADOW_MIN_BIAS);
+            if (shader_shadow_slope_bias_loc >= 0) shader->setFloat(shader_shadow_slope_bias_loc, Options::SHADOW_SLOPE_BIAS);
+            if (shader_shadow_pcf_radius_loc >= 0) shader->setInt(shader_shadow_pcf_radius_loc, Options::SHADOW_PCF_RADIUS);
+        } else if (shader_cascade_count_loc >= 0) {
+            // Explicitly disable shadows in shader if resources are missing
+            shader->setInt(shader_cascade_count_loc, 0);
+        }
+    }
+
+    glEnable(GL_CULL_FACE);
     for(auto* c : visible_chunks) c->draw(GL_TRIANGLES);
     draw_translucent();
 }

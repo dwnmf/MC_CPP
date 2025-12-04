@@ -12,6 +12,16 @@ const float SPRINTING_SPEED = 7.0f;
 Player::Player(World* w, Shader* s, float vw, float vh)
 : Entity(w), shader(s), view_width(vw), view_height(vh), eyelevel(1.6f), input(0), near_plane(0.1f), far_plane(500.0f), speed(4.3f), target_speed(4.3f), is_sprinting(false), max_health(10.0f), health(10.0f) {}
 
+float Player::get_current_fov() const {
+    float denom = (SPRINTING_SPEED - WALKING_SPEED);
+    float factor = 0.0f;
+    if (denom > 0.0001f) {
+        factor = (speed - WALKING_SPEED) / denom;
+    }
+    factor = std::clamp(factor, 0.0f, 1.0f);
+    return Options::FOV + 10.0f * factor;
+}
+
 void Player::handle_input_sprint(bool ctrl_pressed, bool forward_pressed) {
     // Логика как в оригинале:
     // Если нажали Ctrl и идем вперед -> включаем бег
@@ -72,7 +82,7 @@ void Player::update_matrices(float partial_ticks) {
     interpolated_position = glm::mix(old_position, position, partial_ticks);
 
     // Динамический FOV при беге
-    float fov_mod = Options::FOV + 10.0f * (speed - WALKING_SPEED) / (SPRINTING_SPEED - WALKING_SPEED);
+    float fov_mod = get_current_fov();
 
     p_matrix = glm::perspective(glm::radians(fov_mod), view_width/view_height, near_plane, far_plane);
     mv_matrix = glm::mat4(1.0f);
@@ -83,7 +93,12 @@ void Player::update_matrices(float partial_ticks) {
     mv_matrix = glm::translate(mv_matrix, -interpolated_position - glm::vec3(0, eyelevel + step_offset, 0));
 
     vp_matrix = p_matrix * mv_matrix;
-    shader->setMat4(shader->find_uniform("u_MVPMatrix"), vp_matrix);
+    if (shader && shader->valid()) {
+        int mvpLoc = shader->find_uniform("u_MVPMatrix");
+        int viewLoc = shader->find_uniform("u_ViewMatrix");
+        shader->setMat4(mvpLoc, vp_matrix);
+        if (viewLoc >= 0) shader->setMat4(viewLoc, mv_matrix);
+    }
 }
 
 bool Player::check_in_frustum(glm::ivec3 chunk_pos) {

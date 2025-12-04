@@ -595,6 +595,14 @@ int main() {
         player.update(static_cast<float>(dt));
         world.tick(static_cast<float>(dt));
 
+        // Обновляем матрицы камеры и список видимых чанков до рендера теней
+        // ВАЖНО: делаем use() основного шейдера до update_matrices,
+        // чтобы u_MVPMatrix/u_ViewMatrix записывались в правильную программу.
+        shader.use();
+        player.update_matrices(1.0f);
+        world.prepare_rendering();
+        world.render_shadows();
+
         float daylight_factor = world.get_daylight_factor();
         glClearColor(0.5f * daylight_factor, 0.8f * daylight_factor, 1.0f * daylight_factor, 1.0f);
 
@@ -604,8 +612,6 @@ int main() {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, tm.texture_array);
 
-        player.update_matrices(1.0f);
-        world.prepare_rendering();
         world.draw();
 
         glm::ivec3 headPos = glm::round(player.interpolated_position + glm::vec3(0, player.eyelevel, 0));
