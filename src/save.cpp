@@ -13,21 +13,28 @@ namespace fs = std::filesystem;
 
 Save::Save(World* w) : world(w), path("save") {}
 
-// Функция для генерации имен папок (как в Minecraft Classic/Indev)
+// Base36 encoding for chunk folder/file names (Minecraft-style)
 std::string to_base36(int value) {
     std::string chars = "0123456789abcdefghijklmnopqrstuvwxyz";
-    std::string result = "";
+    std::string result;
     if (value == 0) return "0";
     int val = std::abs(value);
-    while (val > 0) { result = chars[val % 36] + result; val /= 36; }
+    while (val > 0) {
+        result = chars[val % 36] + result;
+        val /= 36;
+    }
     if (value < 0) result = "-" + result;
     return result;
 }
 
 namespace {
-int manhattan_distance_offset(const glm::ivec3& offset) { return std::abs(offset.x) + std::abs(offset.z); }
-int ring_distance_offset(const glm::ivec3& offset) { return std::max(std::abs(offset.x), std::abs(offset.z)); }
+int manhattan_distance_offset(const glm::ivec3& offset) {
+    return std::abs(offset.x) + std::abs(offset.z);
 }
+int ring_distance_offset(const glm::ivec3& offset) {
+    return std::max(std::abs(offset.x), std::abs(offset.z));
+}
+} // namespace
 
 bool Save::save_chunk(Chunk* chunk) {
     if (!chunk) return false;
@@ -37,8 +44,8 @@ bool Save::save_chunk(Chunk* chunk) {
     int x = chunk->chunk_position.x;
     int z = chunk->chunk_position.z;
 
-    int rx = x % 64; if(rx<0) rx+=64;
-    int rz = z % 64; if(rz<0) rz+=64;
+    int rx = x % 64; if (rx < 0) rx += 64;
+    int rz = z % 64; if (rz < 0) rz += 64;
 
     std::string dir_path = path + "/" + to_base36(rx) + "/" + to_base36(rz);
 
@@ -62,16 +69,13 @@ bool Save::save_chunk(Chunk* chunk) {
 }
 
 void Save::save() {
-    // Убедимся, что корневая папка существует
     if (!fs::exists(path)) fs::create_directory(path);
 
     int saved_count = 0;
 
-    for(auto& kv : world->chunks) {
+    for (auto& kv : world->chunks) {
         Chunk* c = kv.second;
-
-        // Сохраняем только если были изменения (или можно убрать проверку для принудительного сохранения)
-        if(!c->modified) continue;
+        if (!c->modified) continue;
 
         if (save_chunk(c)) {
             saved_count++;
@@ -83,6 +87,7 @@ void Save::save() {
 }
 
 bool Save::load_chunk(const glm::ivec3& chunk_pos, bool eager_build) {
+    if (!world) return false;
     if (world->chunks.find(chunk_pos) != world->chunks.end()) return false;
 
     Chunk* c = new Chunk(world, chunk_pos);
@@ -97,40 +102,53 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos, bool eager_build) {
         c->neighbors[i] = n;
         if (n) n->neighbors[OPPOSITE[i]] = c;
     }
+
     bool loaded = false;
 
-    // Пробуем загрузить из структурированной папки (NBT)
+    // Try NBT (gzip) save first
     int x = chunk_pos.x;
     int z = chunk_pos.z;
-    int rx = x % 64; if(rx<0) rx+=64;
-    int rz = z % 64; if(rz<0) rz+=64;
+    int rx = x % 64; if (rx < 0) rx += 64;
+    int rz = z % 64; if (rz < 0) rz += 64;
     std::string nbt_path = path + "/" + to_base36(rx) + "/" + to_base36(rz) + "/c." + to_base36(x) + "." + to_base36(z) + ".dat";
-    if (std::filesystem::exists(nbt_path)) {
-        if (NBT::read_blocks_from_gzip(nbt_path, (uint8_t*)c->blocks, sizeof(c->blocks))) loaded = true;
+    if (fs::exists(nbt_path)) {
+        if (NBT::read_blocks_from_gzip(nbt_path, (uint8_t*)c->blocks, sizeof(c->blocks))) {
+            loaded = true;
+        }
     }
 
-    // Fallback: Пробуем старый формат (плоская папка), если вдруг он остался
+    // Fallback: legacy binary format
     if (!loaded) {
         std::string bin_path = path + "/c." + std::to_string(x) + "." + std::to_string(z) + ".dat";
         std::ifstream in(bin_path, std::ios::binary);
-        if (in.is_open()) { in.read((char*)c->blocks, sizeof(c->blocks)); loaded = true; }
+        if (in.is_open()) {
+            in.read((char*)c->blocks, sizeof(c->blocks));
+            if (in.gcount() == sizeof(c->blocks)) {
+                loaded = true;
+            }
+        }
     }
 
-    // Генерация нового чанка, если не загрузили
+    // Treat all-zero chunks from disk as empty → regenerate flat terrain
     if (loaded) {
         bool has_data = false;
         for (int lx = 0; lx < CHUNK_WIDTH && !has_data; lx++) {
             for (int ly = 0; ly < CHUNK_HEIGHT && !has_data; ly++) {
                 for (int lz = 0; lz < CHUNK_LENGTH; lz++) {
-                    if (c->blocks[lx][ly][lz] != 0) { has_data = true; break; }
+                    if (c->blocks[lx][ly][lz] != 0) {
+                        has_data = true;
+                        break;
+                    }
                 }
             }
         }
-        if (!has_data) loaded = false;
+        if (!has_data) {
+            loaded = false;
+        }
     }
 
     if (!loaded) {
-        // Flat world gen
+        // Flat world generation (stone/dirt/grass stack)
         for (int lx = 0; lx < CHUNK_WIDTH; lx++) {
             for (int lz = 0; lz < CHUNK_LENGTH; lz++) {
                 for (int ly = 0; ly < CHUNK_HEIGHT; ly++) {
@@ -144,30 +162,36 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos, bool eager_build) {
         c->modified = true;
     }
 
-    // Инициализация света для только что созданного чанка
+    // Skylight from top + stitching with neighbors
     world->init_skylight(c);
     world->stitch_sky_light(c);
 
-    // Проставляем block light для источников
-    auto is_light_source = [&](int id) {
-        return std::find(world->light_blocks.begin(), world->light_blocks.end(), id) != world->light_blocks.end();
-    };
+    // Initialize block light only for chunks loaded from save (fallback flat chunks have no emitters)
+    if (loaded) {
+        auto is_light_source = [&](int id) {
+            return world->light_blocks.count(id) != 0;
+        };
 
-    for(int lx=0; lx<CHUNK_WIDTH; lx++) {
-        for(int ly=0; ly<CHUNK_HEIGHT; ly++) {
-            for(int lz=0; lz<CHUNK_LENGTH; lz++) {
-                int id = c->blocks[lx][ly][lz];
-                if (id == 0) continue;
-                if (is_light_source(id)) {
-                    c->set_block_light({lx,ly,lz}, 15);
-                    glm::ivec3 global_pos = {c->chunk_position.x * 16 + lx, ly, c->chunk_position.z * 16 + lz};
-                    world->light_increase_queue.push_back({global_pos, 15});
+        for (int lx = 0; lx < CHUNK_WIDTH; lx++) {
+            for (int ly = 0; ly < CHUNK_HEIGHT; ly++) {
+                for (int lz = 0; lz < CHUNK_LENGTH; lz++) {
+                    int id = c->blocks[lx][ly][lz];
+                    if (id == 0) continue;
+                    if (is_light_source(id)) {
+                        c->set_block_light({lx, ly, lz}, 15);
+                        glm::ivec3 global_pos = {
+                            c->chunk_position.x * CHUNK_WIDTH + lx,
+                            ly,
+                            c->chunk_position.z * CHUNK_LENGTH + lz
+                        };
+                        world->light_increase_queue.push_back({global_pos, 15});
+                    }
                 }
             }
         }
     }
 
-    // Подхватываем свет от соседних чанков (торчи, лава и т.п.) на границах
+    // Stitch block light with neighbors
     world->stitch_block_light(c);
 
     if (eager_build) {
@@ -212,13 +236,13 @@ void Save::load(int initial_radius) {
 
     std::vector<glm::ivec3> offsets;
     offsets.reserve(radius * radius * 4);
-    for(int x = (-1) * radius; x < radius; x++) {
-        for(int z = (-1) * radius; z < radius; z++) {
+    for (int x = -radius; x < radius; x++) {
+        for (int z = -radius; z < radius; z++) {
             offsets.push_back({x, 0, z});
         }
     }
 
-    std::sort(offsets.begin(), offsets.end(), [](const glm::ivec3& a, const glm::ivec3& b){
+    std::sort(offsets.begin(), offsets.end(), [](const glm::ivec3& a, const glm::ivec3& b) {
         int da = manhattan_distance_offset(a);
         int db = manhattan_distance_offset(b);
         if (da == db) return ring_distance_offset(a) < ring_distance_offset(b);
