@@ -3,13 +3,14 @@
 #include "../chunk/chunk.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/norm.hpp>
+#include <algorithm>
 
 // Константы скорости
 const float WALKING_SPEED = 4.317f;
 const float SPRINTING_SPEED = 7.0f;
 
 Player::Player(World* w, Shader* s, float vw, float vh)
-: Entity(w), shader(s), view_width(vw), view_height(vh), eyelevel(1.6), input(0), speed(4.3), target_speed(4.3) {}
+: Entity(w), shader(s), view_width(vw), view_height(vh), eyelevel(1.6f), input(0), near_plane(0.1f), far_plane(500.0f), speed(4.3f), target_speed(4.3f), is_sprinting(false), max_health(10.0f), health(10.0f) {}
 
 void Player::handle_input_sprint(bool ctrl_pressed, bool forward_pressed) {
     // Логика как в оригинале:
@@ -23,6 +24,14 @@ void Player::handle_input_sprint(bool ctrl_pressed, bool forward_pressed) {
     }
 
     target_speed = is_sprinting ? SPRINTING_SPEED : WALKING_SPEED;
+}
+
+void Player::heal(float amount) {
+    health = std::clamp(health + amount, 0.0f, max_health);
+}
+
+void Player::take_damage(float amount) {
+    health = std::clamp(health - amount, 0.0f, max_health);
 }
 
 void Player::update(float dt) {
@@ -65,7 +74,7 @@ void Player::update_matrices(float partial_ticks) {
     // Динамический FOV при беге
     float fov_mod = Options::FOV + 10.0f * (speed - WALKING_SPEED) / (SPRINTING_SPEED - WALKING_SPEED);
 
-    p_matrix = glm::perspective(glm::radians(fov_mod), view_width/view_height, 0.1f, 500.0f);
+    p_matrix = glm::perspective(glm::radians(fov_mod), view_width/view_height, near_plane, far_plane);
     mv_matrix = glm::mat4(1.0f);
     mv_matrix = glm::rotate(mv_matrix, rotation.y, glm::vec3(-1,0,0));
     mv_matrix = glm::rotate(mv_matrix, rotation.x + 1.57f, glm::vec3(0,1,0));

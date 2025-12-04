@@ -39,17 +39,23 @@ void main(void) {
 						u_ChunkPosition.y * CHUNK_LENGTH + a_LocalPosition.z);
 	v_TexCoords = vec3(u, v, layer);
 
-	float blocklightMultiplier = pow(0.8, 15.0 - a_Light);
-	float skylightMultiplier = (a_Skylight > 0.0)
-		? pow(0.8, 15.0 - a_Skylight)
-		: 0.0;
-	float skyLight = skylightMultiplier * u_Daylight;
+	// --- Colored lighting model ---
+	float blockLevel = a_Light / 15.0;
+	float skyLevel = a_Skylight / 15.0;
 
-	v_Light = vec3(
-		clamp(blocklightMultiplier * 1.5, skyLight, 1.0),
-		clamp(blocklightMultiplier * 1.25, skyLight, 1.0),
-		clamp(skylightMultiplier * (2.0 - pow(u_Daylight, 2)), blocklightMultiplier, 1.0)
-	) * shading;
+	vec3 blockTint = vec3(1.10, 0.85, 0.65);
+	vec3 skyNight = vec3(0.25, 0.35, 0.55);
+	vec3 skyDay = vec3(0.85, 0.95, 1.05);
+	vec3 skyTint = mix(skyNight, skyDay, clamp(u_Daylight, 0.0, 1.0));
+
+	float blockIntensity = pow(blockLevel, 1.1);
+	float skyIntensity = pow(skyLevel * u_Daylight, 1.2);
+
+	vec3 light = blockTint * blockIntensity + skyTint * skyIntensity;
+	light = max(light, vec3(0.02));
+	light = min(light, vec3(1.0));
+
+	v_Light = light * shading;
 
 	gl_Position = u_MVPMatrix * vec4(v_Position, 1.0);
 }

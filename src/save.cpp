@@ -82,7 +82,7 @@ void Save::save() {
     std::cout << "Saved " << saved_count << " chunks." << std::endl;
 }
 
-bool Save::load_chunk(const glm::ivec3& chunk_pos) {
+bool Save::load_chunk(const glm::ivec3& chunk_pos, bool eager_build) {
     if (world->chunks.find(chunk_pos) != world->chunks.end()) return false;
 
     Chunk* c = new Chunk(world, chunk_pos);
@@ -146,6 +146,7 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
 
     // Инициализация света для только что созданного чанка
     world->init_skylight(c);
+    world->stitch_sky_light(c);
 
     // Проставляем block light для источников
     auto is_light_source = [&](int id) {
@@ -166,12 +167,16 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
         }
     }
 
-    world->propagate_skylight_increase(false, std::numeric_limits<int>::max());
-    world->propagate_increase(false, std::numeric_limits<int>::max());
+    // Подхватываем свет от соседних чанков (торчи, лава и т.п.) на границах
+    world->stitch_block_light(c);
+
+    if (eager_build) {
+        world->propagate_skylight_increase(false, std::numeric_limits<int>::max());
+        world->propagate_increase(false, std::numeric_limits<int>::max());
+    }
 
     c->update_subchunk_meshes();
 
-    // Update neighbor meshes so shared faces get correct lighting.
     auto update_neighbor = [&](glm::ivec3 offset) {
         glm::ivec3 n_pos = c->chunk_position + offset;
         auto it = world->chunks.find(n_pos);
@@ -185,23 +190,6 @@ bool Save::load_chunk(const glm::ivec3& chunk_pos) {
     update_neighbor(Util::WEST);
     update_neighbor(Util::NORTH);
     update_neighbor(Util::SOUTH);
-
-    // Build all subchunks immediately so the chunk is renderable right after load.
-    for (auto& kv : c->subchunks) {
-        kv.second->update_mesh();
-    }
-    c->update_mesh();
-
-    // Debug: warn if mesh ended up empty right after generation/load
-    if (c->mesh_quad_count == 0 && c->translucent_quad_count == 0) {
-        int filled = 0;
-        for (int lx = 0; lx < CHUNK_WIDTH; lx++)
-            for (int ly = 0; ly < CHUNK_HEIGHT; ly++)
-                for (int lz = 0; lz < CHUNK_LENGTH; lz++)
-                    if (c->blocks[lx][ly][lz] != 0) filled++;
-        std::cout << "Chunk " << chunk_pos.x << "," << chunk_pos.z
-                  << " mesh empty right after build. Filled blocks=" << filled << std::endl;
-    }
 
     return true;
 }
@@ -241,7 +229,7 @@ void Save::load(int initial_radius) {
     for (const auto& offset : offsets) {
         glm::ivec3 chunk_pos = center_chunk + offset;
         if (ring_distance_offset(offset) <= initial_radius) {
-            load_chunk(chunk_pos);
+            load_chunk(chunk_pos, true);
             loaded_now++;
         } else {
             pending_chunks.push_back(chunk_pos);
@@ -321,7 +309,7 @@ void Save::stream_next(int max_chunks) {
     while (loaded < max_chunks && !pending_chunks.empty()) {
         glm::ivec3 pos = pending_chunks.front();
         pending_chunks.pop_front();
-        load_chunk(pos);
+        load_chunk(pos, false);
         loaded++;
     }
     if (pending_chunks.empty() && loaded > 0) {

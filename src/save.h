@@ -21,7 +21,7 @@ public:
     bool has_pending_chunks() const { return !pending_chunks.empty(); }
 
 private:
-    bool load_chunk(const glm::ivec3& pos);
+    bool load_chunk(const glm::ivec3& pos, bool eager_build);
     bool save_chunk(Chunk* chunk);
     std::deque<glm::ivec3> pending_chunks;
     glm::ivec3 last_center_chunk = glm::ivec3(999999);

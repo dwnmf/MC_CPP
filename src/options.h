@@ -16,4 +16,13 @@ namespace Options {
     inline bool COLORED_LIGHTING = true;
     inline int ANTIALIASING = 0;
     inline int LIGHT_STEPS_PER_TICK = 2048;
+
+    // Shadow mapping (CSM)
+    inline bool SHADOWS_ENABLED = false;
+    inline int SHADOW_MAP_RESOLUTION = 2048;
+    inline int SHADOW_CASCADES = 4;
+    inline float SHADOW_LOG_WEIGHT = 0.85f;
+    inline float SHADOW_MIN_BIAS = 0.0006f;
+    inline float SHADOW_SLOPE_BIAS = 0.0025f;
+    inline int SHADOW_PCF_RADIUS = 1; // 1 -> 3x3 kernel, 2 -> 5x5
 }

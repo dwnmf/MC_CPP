@@ -8,6 +8,7 @@
 #include <cstdint>
 #include "subchunk.h"
 #include "../util.h"
+#include "../renderer/shader.h"
 
 class World;
 
@@ -56,6 +57,6 @@ public:
     void process_chunk_updates();
     void update_mesh();
     void send_mesh_data_to_gpu();
-    void draw(GLenum mode);
-    void draw_translucent(GLenum mode);
+    void draw(GLenum mode, Shader* override_shader = nullptr, int chunk_uniform = -1);
+    void draw_translucent(GLenum mode, Shader* override_shader = nullptr, int chunk_uniform = -1);
 };

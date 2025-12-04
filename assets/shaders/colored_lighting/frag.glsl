@@ -16,6 +16,5 @@ void main(void) {
 		discard;
 	}
 
-
 	fragColor = textureColor * vec4(v_Light, 1.0);
 }

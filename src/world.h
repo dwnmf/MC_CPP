@@ -69,7 +69,11 @@ public:
     void propagate_decrease(bool update, int max_steps = -1);
     void propagate_skylight_increase(bool update, int max_steps = -1);
     void propagate_skylight_decrease(bool update, int max_steps = -1);
+    void stitch_block_light(class Chunk* c);
+    void stitch_sky_light(class Chunk* c);
 
     void prepare_rendering();
     void speed_daytime();
+    glm::vec3 get_light_direction() const;
+    float get_daylight_factor() const;
 };

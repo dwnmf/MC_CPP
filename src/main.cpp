@@ -43,6 +43,10 @@ bool in_menu = true;
 GLuint crosshairVAO, crosshairVBO;
 GLuint uiShaderProgram;
 
+// --- HEALTH BAR (TRIANGLES) ---
+GLuint triangleVAO = 0, triangleVBO = 0;
+Shader* uiTriangleShader = nullptr;
+
 // Шейдер для курсора
 const char* crosshairVertexShader = R"(
 #version 330 core
@@ -119,6 +123,83 @@ void draw_crosshair() {
     glEnable(GL_DEPTH_TEST);
 }
 
+// --- HEALTH BAR (TRIANGLES) ---
+void init_ui_resources() {
+    uiTriangleShader = new Shader("assets/shaders/ui/triangle_vert.glsl", "assets/shaders/ui/triangle_frag.glsl");
+    if (!uiTriangleShader->valid()) {
+        std::cout << "Failed to load triangle UI shader." << std::endl;
+        delete uiTriangleShader;
+        uiTriangleShader = nullptr;
+        return;
+    }
+
+    float quadVertices[] = {
+        // Pos        // UV
+        0.0f, 1.0f,   0.0f, 1.0f,
+        0.0f, 0.0f,   0.0f, 0.0f,
+        1.0f, 0.0f,   1.0f, 0.0f,
+
+        0.0f, 1.0f,   0.0f, 1.0f,
+        1.0f, 0.0f,   1.0f, 0.0f,
+        1.0f, 1.0f,   1.0f, 1.0f
+    };
+
+    glGenVertexArrays(1, &triangleVAO);
+    glGenBuffers(1, &triangleVBO);
+    glBindVertexArray(triangleVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, triangleVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glBindVertexArray(0);
+}
+
+void draw_health_bar() {
+    if (!uiTriangleShader || !uiTriangleShader->valid() || !player_ptr || triangleVAO == 0) return;
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    uiTriangleShader->use();
+    uiTriangleShader->setFloat(uiTriangleShader->find_uniform("u_Time"), static_cast<float>(glfwGetTime()));
+
+    int offsetLoc = uiTriangleShader->find_uniform("u_Offset");
+    int scaleLoc = uiTriangleShader->find_uniform("u_Scale");
+    int fullnessLoc = uiTriangleShader->find_uniform("u_Fullness");
+
+    glBindVertexArray(triangleVAO);
+
+    float startX = -0.95f;
+    float startY = -0.90f;
+    float size = 0.07f;
+    float spacing = size * 1.15f;
+    float aspect = static_cast<float>(SCR_WIDTH) / static_cast<float>(SCR_HEIGHT);
+    glm::vec2 scaleVec(size / aspect, size);
+
+    int maxHearts = static_cast<int>(player_ptr->max_health);
+    float currentHealth = player_ptr->health;
+
+    for (int i = 0; i < maxHearts; i++) {
+        float offsetX = startX + (i * spacing / aspect);
+        uiTriangleShader->setVec2(offsetLoc, glm::vec2(offsetX, startY));
+        uiTriangleShader->setVec2(scaleLoc, scaleVec);
+
+        float status = (currentHealth >= static_cast<float>(i + 1)) ? 1.0f : 0.0f;
+        uiTriangleShader->setFloat(fullnessLoc, status);
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    glBindVertexArray(0);
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+}
+
 // --- F3 DEBUG INFO ---
 void draw_f3_screen(float fps) {
     if (!show_f3 || !text_renderer) return;
@@ -161,6 +242,11 @@ void draw_f3_screen(float fps) {
     int bl = world_ptr->get_light(ipos);
     int sl = world_ptr->get_skylight(ipos);
     ss << "Light: " << std::max(bl, sl) << " (" << sl << " sky, " << bl << " block)";
+    lines.push_back(ss.str()); ss.str("");
+
+    ss << "Input: captured=" << (mouse_captured ? "1" : "0")
+       << " rot=(" << player_ptr->rotation.x << "," << player_ptr->rotation.y << ")"
+       << " input=(" << player_ptr->input.x << "," << player_ptr->input.y << "," << player_ptr->input.z << ")";
     lines.push_back(ss.str()); ss.str("");
 
     float y = 10.0f;
@@ -283,6 +369,14 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
         player_ptr->rotation.x += xoffset * 0.002; player_ptr->rotation.y += yoffset * 0.002;
         if (player_ptr->rotation.y > 1.57f) player_ptr->rotation.y = 1.57f;
         if (player_ptr->rotation.y < -1.57f) player_ptr->rotation.y = -1.57f;
+
+        static double last_log = 0.0;
+        double now = glfwGetTime();
+        if (now - last_log > 0.5) {
+            std::cout << "[mouse] dx=" << xoffset << " dy=" << yoffset
+                      << " rot=(" << player_ptr->rotation.x << "," << player_ptr->rotation.y << ")\n";
+            last_log = now;
+        }
     }
 }
 
@@ -313,6 +407,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9) holding_block = key - GLFW_KEY_0;
         if (key == GLFW_KEY_F && player_ptr) player_ptr->flying = !player_ptr->flying;
         if (key == GLFW_KEY_F3) show_f3 = !show_f3;
+        if (key == GLFW_KEY_E && player_ptr) player_ptr->heal(1.0f);
+        if (key == GLFW_KEY_R && player_ptr) player_ptr->take_damage(1.0f);
 
         // --- СОХРАНЕНИЕ НА КЛАВИШУ O ---
         if (key == GLFW_KEY_O) {
@@ -378,6 +474,7 @@ int main() {
 
     init_crosshair();
     update_crosshair_mesh(SCR_WIDTH, SCR_HEIGHT);
+    init_ui_resources();
 
     text_renderer = new TextRenderer(SCR_WIDTH, SCR_HEIGHT);
     text_renderer->Load("assets/font.ttf", 24);
@@ -435,13 +532,25 @@ int main() {
 
     Shader shader("assets/shaders/colored_lighting/vert.glsl", "assets/shaders/colored_lighting/frag.glsl");
     TextureManager tm(16, 16, 256);
+
     shader.use();
-    shader.setInt(shader.find_uniform("u_TextureArraySampler"), 0);
+    int uTextureLoc = shader.find_uniform("u_TextureArraySampler");
+    shader.setInt(uTextureLoc, 0);
+
+    // Capture mouse by default in-game to ensure input works without a first click
+    mouse_captured = true;
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    if (glfwRawMouseMotionSupported()) {
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+    }
+
     World world(&shader, &tm, nullptr);
     Player player(&world, &shader, SCR_WIDTH, SCR_HEIGHT);
     world.player = &player;
     world_ptr = &world;
     player_ptr = &player;
+
+    shader.use();
 
     load_blocks(world, tm);
     tm.generate_mipmaps();
@@ -451,49 +560,51 @@ int main() {
 
     Audio::Init();
 
-    const double limit = 1.0 / 60.0;
     double lastTime = glfwGetTime();
-    double delta = 0, now = 0;
     int frames = 0;
     float fps_display = 0.0f;
     double fps_timer = 0.0;
 
     while (!glfwWindowShouldClose(window)) {
-        now = glfwGetTime();
-        delta += (now - lastTime) / limit;
+        double now = glfwGetTime();
+        double dt = now - lastTime;
         lastTime = now;
+        if (dt > 0.1) dt = 0.1; // avoid giant steps if paused
 
-        Audio::Update(limit); // Обновление музыки
+        // Keep cursor capture state enforced (e.g., after alt-tab)
+        if (mouse_captured) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        else glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+
+        Audio::Update(static_cast<float>(dt)); // Обновление музыки
         if (world.save_system) {
             world.save_system->update_streaming(player.position);
             world.save_system->stream_next(1); // Постепенно подгружаем чанки без длинного старта
         }
 
-        while (delta >= 1.0) {
-            player.input = glm::vec3(0);
-            bool forward = false;
-            if(glfwGetKey(window, GLFW_KEY_W)==GLFW_PRESS) { player.input.z += 1; forward = true; }
-            if(glfwGetKey(window, GLFW_KEY_S)==GLFW_PRESS) player.input.z -= 1;
-            if(glfwGetKey(window, GLFW_KEY_A)==GLFW_PRESS) player.input.x -= 1;
-            if(glfwGetKey(window, GLFW_KEY_D)==GLFW_PRESS) player.input.x += 1;
-            if(glfwGetKey(window, GLFW_KEY_SPACE)==GLFW_PRESS) player.input.y += 1;
-            if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS && player.flying) player.input.y -= 1;
-            bool ctrl = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL)==GLFW_PRESS);
-            player.handle_input_sprint(ctrl, forward);
+        player.input = glm::vec3(0);
+        bool forward = false;
+        if(glfwGetKey(window, GLFW_KEY_W)==GLFW_PRESS) { player.input.z += 1; forward = true; }
+        if(glfwGetKey(window, GLFW_KEY_S)==GLFW_PRESS) player.input.z -= 1;
+        if(glfwGetKey(window, GLFW_KEY_A)==GLFW_PRESS) player.input.x -= 1;
+        if(glfwGetKey(window, GLFW_KEY_D)==GLFW_PRESS) player.input.x += 1;
+        if(glfwGetKey(window, GLFW_KEY_SPACE)==GLFW_PRESS) player.input.y += 1;
+        if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS && player.flying) player.input.y -= 1;
+        bool ctrl = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL)==GLFW_PRESS);
+        player.handle_input_sprint(ctrl, forward);
 
-            player.update(limit);
-            world.tick(limit);
-            delta--;
-        }
+        player.update(static_cast<float>(dt));
+        world.tick(static_cast<float>(dt));
 
-        float daylight_factor = world.daylight / 1800.0f;
+        float daylight_factor = world.get_daylight_factor();
         glClearColor(0.5f * daylight_factor, 0.8f * daylight_factor, 1.0f * daylight_factor, 1.0f);
 
         post_processor->beginRender();
         shader.use();
+
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, tm.texture_array);
-        player.update_matrices(delta);
+
+        player.update_matrices(1.0f);
         world.prepare_rendering();
         world.draw();
 
@@ -504,6 +615,7 @@ int main() {
         post_processor->endRenderAndDraw(isUnderwater, static_cast<float>(now));
 
         draw_crosshair();
+        draw_health_bar();
         draw_f3_screen(fps_display);
 
         glfwSwapBuffers(window);
@@ -514,11 +626,24 @@ int main() {
             fps_display = frames;
             frames = 0;
             fps_timer = glfwGetTime();
+            // Debug input state once per second
+            int w_state = glfwGetKey(window, GLFW_KEY_W);
+            int a_state = glfwGetKey(window, GLFW_KEY_A);
+            int s_state = glfwGetKey(window, GLFW_KEY_S);
+            int d_state = glfwGetKey(window, GLFW_KEY_D);
+            std::cout << "[input] captured=" << mouse_captured
+                      << " W:" << w_state << " A:" << a_state << " S:" << s_state << " D:" << d_state
+                      << " rot=(" << player.rotation.x << "," << player.rotation.y << ")"
+                      << " pos=(" << player.position.x << "," << player.position.y << "," << player.position.z << ")"
+                      << std::endl;
         }
 
     }
 
     world.save_system->save();
+    if (uiTriangleShader) { delete uiTriangleShader; uiTriangleShader = nullptr; }
+    if (triangleVBO) glDeleteBuffers(1, &triangleVBO);
+    if (triangleVAO) glDeleteVertexArrays(1, &triangleVAO);
     Audio::Close();
     delete post_processor;
     glfwTerminate();

@@ -6,6 +6,8 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/norm.hpp>
 #include <limits>
+#include <cmath>
+#include <glm/gtc/constants.hpp>
 
 World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_manager(tm), player(p) {
 #ifndef UNIT_TEST
@@ -47,6 +49,8 @@ void World::set_block(glm::ivec3 pos, int number) {
         if(number == 0) return;
         chunks[cp] = new Chunk(this, cp);
         init_skylight(chunks[cp]);
+        stitch_sky_light(chunks[cp]);
+        stitch_block_light(chunks[cp]);
     }
     glm::ivec3 lp = get_local_pos(glm::vec3(pos));
     Chunk* c = chunks[cp];
@@ -302,15 +306,88 @@ void World::propagate_skylight_decrease(bool update, int max_steps) {
     }
 }
 void World::speed_daytime() { if(daylight <= 480) incrementer = 1; if(daylight >= 1800) incrementer = -1; }
+glm::vec3 World::get_light_direction() const {
+    double phase = std::fmod(static_cast<double>(time) + 9000.0, 36000.0) / 36000.0;
+    double azimuth = phase * glm::two_pi<double>();
+    float elevation = glm::mix(0.2f, 0.85f, static_cast<float>(0.5 * (std::sin(azimuth) + 1.0)));
+    return glm::normalize(glm::vec3(static_cast<float>(std::cos(azimuth)), -elevation, static_cast<float>(std::sin(azimuth))));
+}
+float World::get_daylight_factor() const {
+    return std::clamp(daylight / 1800.0f, 0.0f, 1.0f);
+}
 void World::tick(float dt) {
     chunk_update_counter = 0; time++; pending_chunk_update_count = 0;
-    if(time % 36000 == 0) incrementer = 1; if(time % 36000 == 18000) incrementer = -1; daylight += incrementer;
+
+    // Day/night cycle: smooth sinusoidal between dawn and noon values
+    double phase = std::fmod(static_cast<double>(time) + 9000.0, 36000.0) / 36000.0;
+    float sun_height = static_cast<float>(0.5 * (std::sin(phase * glm::two_pi<double>()) + 1.0));
+    daylight = glm::mix(480.0f, 1800.0f, sun_height);
+
     if(!chunk_building_queue.empty()) { chunk_building_queue.front()->update_mesh(); chunk_building_queue.pop_front(); }
     for(auto* c : visible_chunks) c->process_chunk_updates();
     propagate_increase(true);
     propagate_decrease(true);
     propagate_skylight_increase(true);
     propagate_skylight_decrease(true);
+}
+
+void World::stitch_block_light(Chunk* c) {
+    glm::ivec3 base = c->chunk_position * glm::ivec3(CHUNK_WIDTH, CHUNK_HEIGHT, CHUNK_LENGTH);
+    auto consider = [&](int lx, int ly, int lz, glm::ivec3 dir) {
+        glm::ivec3 global = base + glm::ivec3(lx, ly, lz);
+        glm::ivec3 npos = global + dir;
+        int neighbor_light = get_light(npos);
+        if (neighbor_light <= 0) return;
+        if (is_opaque_block(global)) return;
+        int candidate = neighbor_light - 1;
+        int current = c->get_block_light({lx, ly, lz});
+        if (candidate > current) {
+            c->set_block_light({lx, ly, lz}, candidate);
+            light_increase_queue.push_back({global, candidate});
+            c->update_at_position({lx, ly, lz});
+        }
+    };
+
+    for (int y = 0; y < CHUNK_HEIGHT; y++) {
+        for (int z = 0; z < CHUNK_LENGTH; z++) {
+            consider(0, y, z, Util::WEST);
+            consider(CHUNK_WIDTH - 1, y, z, Util::EAST);
+        }
+        for (int x = 0; x < CHUNK_WIDTH; x++) {
+            consider(x, y, 0, Util::NORTH);
+            consider(x, y, CHUNK_LENGTH - 1, Util::SOUTH);
+        }
+    }
+}
+
+void World::stitch_sky_light(Chunk* c) {
+    glm::ivec3 base = c->chunk_position * glm::ivec3(CHUNK_WIDTH, CHUNK_HEIGHT, CHUNK_LENGTH);
+    auto consider = [&](int lx, int ly, int lz, glm::ivec3 dir) {
+        glm::ivec3 global = base + glm::ivec3(lx, ly, lz);
+        glm::ivec3 npos = global + dir;
+        int neighbor_light = get_skylight(npos);
+        if (neighbor_light <= 0) return;
+        if (is_opaque_block(global)) return;
+        int decay = (dir.y == -1) ? 0 : 1;
+        int candidate = neighbor_light - decay;
+        int current = c->get_sky_light({lx, ly, lz});
+        if (candidate > current) {
+            c->set_sky_light({lx, ly, lz}, candidate);
+            skylight_increase_queue.push_back({global, candidate});
+            c->update_at_position({lx, ly, lz});
+        }
+    };
+
+    for (int y = 0; y < CHUNK_HEIGHT; y++) {
+        for (int z = 0; z < CHUNK_LENGTH; z++) {
+            consider(0, y, z, Util::WEST);
+            consider(CHUNK_WIDTH - 1, y, z, Util::EAST);
+        }
+        for (int x = 0; x < CHUNK_WIDTH; x++) {
+            consider(x, y, 0, Util::NORTH);
+            consider(x, y, CHUNK_LENGTH - 1, Util::SOUTH);
+        }
+    }
 }
 void World::prepare_rendering() {
 #ifdef UNIT_TEST
@@ -321,7 +398,6 @@ void World::prepare_rendering() {
     candidates.reserve(chunks.size());
     glm::vec3 player_pos = player->position;
     for(auto& kv : chunks) {
-        if(!player->check_in_frustum(kv.first)) continue;
         glm::vec3 center = kv.second->position + glm::vec3(CHUNK_WIDTH * 0.5f, CHUNK_HEIGHT * 0.5f, CHUNK_LENGTH * 0.5f);
         float dist2 = glm::length2(player_pos - center);
         candidates.push_back({dist2, kv.second});
@@ -334,7 +410,8 @@ void World::draw() {
 #ifdef UNIT_TEST
     return;
 #endif
-    float dm = daylight / 1800.0f; glClearColor(0.5 * (dm-0.26), 0.8*(dm-0.26), (dm-0.26)*1.36, 1.0);
+    float dm = get_daylight_factor();
+    glClearColor(0.5f * (dm-0.26f), 0.8f*(dm-0.26f), (dm-0.26f)*1.36f, 1.0f);
     shader->setFloat(shader_daylight_loc, dm); glEnable(GL_CULL_FACE);
     for(auto* c : visible_chunks) c->draw(GL_TRIANGLES);
     draw_translucent();

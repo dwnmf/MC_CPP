@@ -206,22 +206,34 @@ void Chunk::send_mesh_data_to_gpu() {
     if(!translucent_mesh.empty()) glBufferSubData(GL_ARRAY_BUFFER, sizeof(uint32_t)*mesh.size(), sizeof(uint32_t)*translucent_mesh.size(), translucent_mesh.data());
 }
 
-void Chunk::draw(GLenum mode) {
+void Chunk::draw(GLenum mode, Shader* override_shader, int chunk_uniform) {
 #ifdef UNIT_TEST
     return;
 #endif
     if(!mesh_quad_count) return;
+    Shader* active_shader = override_shader ? override_shader : world->shader;
+    if (!active_shader) return;
     glBindVertexArray(vao);
-    world->shader->setVec2i(shader_chunk_offset_loc, chunk_position.x, chunk_position.z);
+    int loc = chunk_uniform;
+    if (loc < 0) {
+        loc = override_shader ? active_shader->find_uniform("u_ChunkPosition") : shader_chunk_offset_loc;
+    }
+    if (loc >= 0) active_shader->setVec2i(loc, chunk_position.x, chunk_position.z);
     glDrawElements(mode, mesh_quad_count * 6, GL_UNSIGNED_INT, 0);
 }
 
-void Chunk::draw_translucent(GLenum mode) {
+void Chunk::draw_translucent(GLenum mode, Shader* override_shader, int chunk_uniform) {
 #ifdef UNIT_TEST
     return;
 #endif
     if(!translucent_quad_count) return;
+    Shader* active_shader = override_shader ? override_shader : world->shader;
+    if (!active_shader) return;
     glBindVertexArray(vao);
-    world->shader->setVec2i(shader_chunk_offset_loc, chunk_position.x, chunk_position.z);
+    int loc = chunk_uniform;
+    if (loc < 0) {
+        loc = override_shader ? active_shader->find_uniform("u_ChunkPosition") : shader_chunk_offset_loc;
+    }
+    if (loc >= 0) active_shader->setVec2i(loc, chunk_position.x, chunk_position.z);
     glDrawElementsBaseVertex(mode, translucent_quad_count * 6, GL_UNSIGNED_INT, 0, mesh_quad_count * 4);
 }

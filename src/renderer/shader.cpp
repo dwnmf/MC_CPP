@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iostream>
 #include <glm/gtc/type_ptr.hpp>
+#include <vector>
 
 namespace {
 bool check_compile(GLuint shader, const std::string& name) {
@@ -86,3 +87,13 @@ void Shader::setMat4(int loc, const glm::mat4& mat) const { glUniformMatrix4fv(l
 void Shader::setInt(int loc, int val) const { glUniform1i(loc, val); }
 void Shader::setFloat(int loc, float val) const { glUniform1f(loc, val); }
 void Shader::setVec2i(int loc, int x, int y) const { glUniform2i(loc, x, y); }
+void Shader::setVec2(int loc, const glm::vec2& vec) const { glUniform2fv(loc, 1, glm::value_ptr(vec)); }
+void Shader::setVec3(int loc, const glm::vec3& vec) const { glUniform3fv(loc, 1, glm::value_ptr(vec)); }
+void Shader::setMat4Array(int loc, const std::vector<glm::mat4>& mats) const {
+    if (loc < 0 || mats.empty()) return;
+    glUniformMatrix4fv(loc, static_cast<GLsizei>(mats.size()), GL_FALSE, glm::value_ptr(mats[0]));
+}
+void Shader::setFloatArray(int loc, const std::vector<float>& values) const {
+    if (loc < 0 || values.empty()) return;
+    glUniform1fv(loc, static_cast<GLsizei>(values.size()), values.data());
+}

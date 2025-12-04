@@ -1,13 +1,14 @@
 #pragma once
 #include <glad/glad.h>
 #include <iostream>
+#include <glm/vec2.hpp>
 #include "shader.h"
 
 class PostProcessor {
 public:
     unsigned int FBO = 0;
     unsigned int textureColorBuffer = 0;
-    unsigned int RBO = 0;
+    unsigned int depthTexture = 0;
     unsigned int quadVAO = 0, quadVBO = 0;
     Shader* postShader = nullptr;
     int width = 0, height = 0;
@@ -26,8 +27,8 @@ public:
     ~PostProcessor() {
         if (quadVBO) glDeleteBuffers(1, &quadVBO);
         if (quadVAO) glDeleteVertexArrays(1, &quadVAO);
-        if (RBO) glDeleteRenderbuffers(1, &RBO);
         if (textureColorBuffer) glDeleteTextures(1, &textureColorBuffer);
+        if (depthTexture) glDeleteTextures(1, &depthTexture);
         if (FBO) glDeleteFramebuffers(1, &FBO);
         delete postShader;
     }
@@ -37,8 +38,8 @@ public:
         width = w; height = h;
         glBindTexture(GL_TEXTURE_2D, textureColorBuffer);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-        glBindRenderbuffer(GL_RENDERBUFFER, RBO);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+        glBindTexture(GL_TEXTURE_2D, depthTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     }
 
     void beginRender() {
@@ -57,11 +58,16 @@ public:
 
         postShader->use();
         postShader->setInt(postShader->find_uniform("screenTexture"), 0);
+        postShader->setInt(postShader->find_uniform("depthTexture"), 1);
         postShader->setInt(postShader->find_uniform("u_IsUnderwater"), isUnderwater ? 1 : 0);
         postShader->setFloat(postShader->find_uniform("u_Time"), time);
+        postShader->setVec2(postShader->find_uniform("u_ScreenSize"), glm::vec2(width, height));
+        postShader->setFloat(postShader->find_uniform("u_SSAOStrength"), 1.0f);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, textureColorBuffer);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, depthTexture);
 
         glBindVertexArray(quadVAO);
         glDisable(GL_DEPTH_TEST);
@@ -85,10 +91,14 @@ private:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureColorBuffer, 0);
 
-        glGenRenderbuffers(1, &RBO);
-        glBindRenderbuffer(GL_RENDERBUFFER, RBO);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, RBO);
+        glGenTextures(1, &depthTexture);
+        glBindTexture(GL_TEXTURE_2D, depthTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
 
         glDrawBuffer(GL_COLOR_ATTACHMENT0);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
