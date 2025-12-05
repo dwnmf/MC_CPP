@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <string>
+#include <memory>
 #include <glm/glm.hpp>
 #include "chunk/chunk.h"
 #include "entity/player.h"
@@ -13,6 +14,9 @@
 #include "save.h"
 #include "util.h"
 #include "physics/collider.h"
+
+class DroppedItem;
+class BlockPreviewRenderer;
 
 class World {
 public:
@@ -50,6 +54,9 @@ public:
     std::vector<glm::mat4> shadow_matrices;
     std::vector<float> shadow_splits;
 
+    std::vector<std::unique_ptr<DroppedItem>> dropped_items;
+    std::unique_ptr<BlockPreviewRenderer> preview_renderer;
+
     // Cached uniform locations in the main world shader
     int shader_shadow_map_loc = -1;
     int shader_light_space_mats_loc = -1;
@@ -71,6 +78,7 @@ public:
 
     void set_block(glm::ivec3 pos, int number);
     bool try_set_block(glm::ivec3 pos, int number, const Collider& player_collider);
+    void break_block(glm::ivec3 pos, bool spawn_drop = true);
 
     int get_block_number(glm::ivec3 pos);
     int get_light(glm::ivec3 pos);
@@ -103,4 +111,9 @@ public:
     void speed_daytime();
     glm::vec3 get_light_direction() const;
     float get_daylight_factor() const;
+
+    void spawn_item_entity(const glm::vec3& pos, int block_id, int count, int metadata = 0);
+    void update_items(float dt);
+    void draw_items(const glm::mat4& view_proj, float brightness);
+    BlockPreviewRenderer* get_preview_renderer() { return preview_renderer.get(); }
 };

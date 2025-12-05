@@ -1,6 +1,7 @@
 #pragma once
 #include "entity.h"
 #include "../renderer/shader.h"
+#include "../inventory.h"
 
 class Player : public Entity {
 public:
@@ -21,6 +22,8 @@ public:
     float health = 10.0f;
 
     glm::vec3 interpolated_position;
+    Inventory inventory;
+    int hotbar_selected = 0;
 
     Player(World* w, Shader* s, float vw, float vh);
     float get_current_fov() const;

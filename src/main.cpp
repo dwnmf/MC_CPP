@@ -20,6 +20,9 @@
 #include "text_renderer.h"
 #include "audio.h"
 #include "renderer/post_processor.h"
+#include "inventory_ui.h"
+#include "renderer/ui_quad_renderer.h"
+#include "inventory.h"
 
 // --- КОНСТАНТЫ ---
 const std::string GAME_TITLE = "MC-CPP";
@@ -31,13 +34,29 @@ World* world_ptr = nullptr;
 Player* player_ptr = nullptr;
 TextRenderer* text_renderer = nullptr;
 PostProcessor* post_processor = nullptr;
+InventoryUI* inventory_ui = nullptr;
+UiQuadRenderer* quad_renderer = nullptr;
 
 bool mouse_captured = false;
-int holding_block = 1;
 bool is_fullscreen = false;
 int windowed_x = 100, windowed_y = 100, windowed_w = 1366, windowed_h = 768;
 bool show_f3 = false;
 bool in_menu = true;
+
+int get_selected_block_id() {
+    if (!player_ptr) return 0;
+    const InventorySlot& slot = player_ptr->inventory.slot(player_ptr->hotbar_selected);
+    return slot.id;
+}
+
+bool consume_selected_block() {
+    if (!player_ptr) return false;
+    InventorySlot& slot = player_ptr->inventory.slot(player_ptr->hotbar_selected);
+    if (slot.empty()) return false;
+    slot.count -= 1;
+    if (slot.count <= 0) slot.clear();
+    return true;
+}
 
 // --- CROSSHAIR (INVERTED & THICK) ---
 GLuint crosshairVAO, crosshairVBO;
@@ -356,6 +375,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     if(player_ptr) { player_ptr->view_width=width; player_ptr->view_height=height; }
     if(text_renderer) text_renderer->SetScreenSize(width, height);
     if(post_processor) post_processor->resize(width, height);
+    if(quad_renderer) quad_renderer->set_screen_size(width, height);
+    if(inventory_ui) inventory_ui->set_screen_size(width, height);
     update_crosshair_mesh(width, height);
 }
 
@@ -382,15 +403,34 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     if (in_menu) return;
+    if (inventory_ui && inventory_ui->is_open()) {
+        double mx, my;
+        glfwGetCursorPos(window, &mx, &my);
+        inventory_ui->handle_mouse_button(button, action, mx, my);
+        return;
+    }
     if(action == GLFW_PRESS) {
         if(!mouse_captured) {
             mouse_captured = true; glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         } else {
             HitRay ray(world_ptr, player_ptr->rotation, player_ptr->interpolated_position + glm::vec3(0, player_ptr->eyelevel, 0));
             auto cb = [&](glm::ivec3 curr, glm::ivec3 next) {
-                if(button == GLFW_MOUSE_BUTTON_LEFT) world_ptr->try_set_block(next, 0, player_ptr->collider);
-                else if(button == GLFW_MOUSE_BUTTON_RIGHT) world_ptr->try_set_block(curr, holding_block, player_ptr->collider);
-                else if(button == GLFW_MOUSE_BUTTON_MIDDLE) holding_block = world_ptr->get_block_number(next);
+                if(button == GLFW_MOUSE_BUTTON_LEFT) {
+                    world_ptr->break_block(next, true);
+                } else if(button == GLFW_MOUSE_BUTTON_RIGHT) {
+                    int block_id = get_selected_block_id();
+                    if (block_id > 0 && world_ptr->try_set_block(curr, block_id, player_ptr->collider)) {
+                        consume_selected_block();
+                    }
+                } else if(button == GLFW_MOUSE_BUTTON_MIDDLE) {
+                    int picked = world_ptr->get_block_number(next);
+                    if (picked > 0 && player_ptr) {
+                        InventorySlot& slot = player_ptr->inventory.slot(player_ptr->hotbar_selected);
+                        slot.id = picked;
+                        slot.count = Inventory::MAX_STACK;
+                        slot.metadata = 0;
+                    }
+                }
             };
                 while(ray.distance < 5.0f) if(ray.step(cb)) break;
         }
@@ -402,13 +442,39 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) glfwSetWindowShouldClose(window, true);
         return;
     }
+
+    auto close_inventory = [&]() {
+        if (inventory_ui && inventory_ui->is_open()) {
+            inventory_ui->close(true);
+            mouse_captured = true;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        }
+    };
+
     if (action == GLFW_PRESS) {
-        if (key == GLFW_KEY_ESCAPE) { mouse_captured = false; glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); }
-        if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9) holding_block = key - GLFW_KEY_0;
+        if (key == GLFW_KEY_ESCAPE) {
+            if (inventory_ui && inventory_ui->is_open()) {
+                close_inventory();
+            } else {
+                mouse_captured = false;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            }
+        }
+        if (key == GLFW_KEY_E || key == GLFW_KEY_I) {
+            if (inventory_ui) {
+                if (inventory_ui->is_open()) {
+                    close_inventory();
+                } else {
+                    inventory_ui->open();
+                    mouse_captured = false;
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                }
+            }
+        }
+        if (inventory_ui && inventory_ui->is_open()) return;
+        if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9 && player_ptr) player_ptr->hotbar_selected = key - GLFW_KEY_1;
         if (key == GLFW_KEY_F && player_ptr) player_ptr->flying = !player_ptr->flying;
         if (key == GLFW_KEY_F3) show_f3 = !show_f3;
-        if (key == GLFW_KEY_E && player_ptr) player_ptr->heal(1.0f);
-        if (key == GLFW_KEY_R && player_ptr) player_ptr->take_damage(1.0f);
 
         // --- СОХРАНЕНИЕ НА КЛАВИШУ O ---
         if (key == GLFW_KEY_O) {
@@ -550,6 +616,11 @@ int main() {
     world_ptr = &world;
     player_ptr = &player;
 
+    quad_renderer = new UiQuadRenderer();
+    if (quad_renderer) quad_renderer->set_screen_size(SCR_WIDTH, SCR_HEIGHT);
+    inventory_ui = new InventoryUI(&player, &world, text_renderer, world.get_preview_renderer(), quad_renderer);
+    if (inventory_ui) inventory_ui->set_screen_size(SCR_WIDTH, SCR_HEIGHT);
+
     shader.use();
 
     load_blocks(world, tm);
@@ -557,6 +628,17 @@ int main() {
 
     world.save_system = new Save(&world);
     world.save_system->load();
+
+    bool inventory_empty = true;
+    for (const auto& slot : player.inventory.data()) {
+        if (!slot.empty()) { inventory_empty = false; break; }
+    }
+    if (inventory_empty) {
+        player.inventory.add_item(1, 64);
+        player.inventory.add_item(2, 64);
+        player.inventory.add_item(3, 32);
+        player.inventory.add_item(4, 16);
+    }
 
     Audio::Init();
 
@@ -581,6 +663,9 @@ int main() {
             world.save_system->stream_next(1); // Постепенно подгружаем чанки без длинного старта
         }
 
+        bool inventory_open = inventory_ui && inventory_ui->is_open();
+        float sim_dt = inventory_open ? 0.0f : static_cast<float>(dt);
+
         player.input = glm::vec3(0);
         bool forward = false;
         if(glfwGetKey(window, GLFW_KEY_W)==GLFW_PRESS) { player.input.z += 1; forward = true; }
@@ -589,11 +674,14 @@ int main() {
         if(glfwGetKey(window, GLFW_KEY_D)==GLFW_PRESS) player.input.x += 1;
         if(glfwGetKey(window, GLFW_KEY_SPACE)==GLFW_PRESS) player.input.y += 1;
         if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS && player.flying) player.input.y -= 1;
+        if (inventory_open) player.input = glm::vec3(0);
         bool ctrl = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL)==GLFW_PRESS);
         player.handle_input_sprint(ctrl, forward);
 
-        player.update(static_cast<float>(dt));
-        world.tick(static_cast<float>(dt));
+        player.update(sim_dt);
+        if (!inventory_open) {
+            world.tick(sim_dt);
+        }
 
         // Обновляем матрицы камеры и список видимых чанков до рендера теней
         // ВАЖНО: делаем use() основного шейдера до update_matrices,
@@ -620,8 +708,16 @@ int main() {
 
         post_processor->endRenderAndDraw(isUnderwater, static_cast<float>(now));
 
-        draw_crosshair();
+        double cursor_x = 0.0, cursor_y = 0.0;
+        glfwGetCursorPos(window, &cursor_x, &cursor_y);
+
+        if (!(inventory_ui && inventory_ui->is_open())) {
+            draw_crosshair();
+        }
         draw_health_bar();
+        if (inventory_ui) {
+            inventory_ui->render(cursor_x, cursor_y);
+        }
         draw_f3_screen(fps_display);
 
         glfwSwapBuffers(window);
@@ -647,6 +743,8 @@ int main() {
     }
 
     world.save_system->save();
+    if (inventory_ui) { delete inventory_ui; inventory_ui = nullptr; }
+    if (quad_renderer) { delete quad_renderer; quad_renderer = nullptr; }
     if (uiTriangleShader) { delete uiTriangleShader; uiTriangleShader = nullptr; }
     if (triangleVBO) glDeleteBuffers(1, &triangleVBO);
     if (triangleVAO) glDeleteVertexArrays(1, &triangleVAO);

@@ -9,6 +9,9 @@
 #include <cmath>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include "entity/item_entity.h"
+#include "renderer/block_preview_renderer.h"
+#include "audio.h"
 
 World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_manager(tm), player(p) {
 #ifndef UNIT_TEST
@@ -35,6 +38,9 @@ World::World(Shader* s, TextureManager* tm, Player* p) : shader(s), texture_mana
             shadows_enabled = false;
         }
     }
+#endif
+#ifndef UNIT_TEST
+    preview_renderer = std::make_unique<BlockPreviewRenderer>(tm);
 #endif
 }
 World::~World() {
@@ -156,6 +162,16 @@ bool World::try_set_block(glm::ivec3 pos, int number, const Collider& player_col
     }
     set_block(pos, number);
     return true;
+}
+
+void World::break_block(glm::ivec3 pos, bool spawn_drop) {
+    int block_id = get_block_number(pos);
+    if (block_id == 0) return;
+    set_block(pos, 0);
+    if (spawn_drop) {
+        glm::vec3 spawn_pos = glm::vec3(pos) + glm::vec3(0.5f);
+        spawn_item_entity(spawn_pos, block_id, 1);
+    }
 }
 
 int World::get_light(glm::ivec3 pos) {
@@ -336,6 +352,79 @@ glm::vec3 World::get_light_direction() const {
 float World::get_daylight_factor() const {
     return std::clamp(daylight / 1800.0f, 0.0f, 1.0f);
 }
+
+void World::spawn_item_entity(const glm::vec3& pos, int block_id, int count, int metadata) {
+#ifdef UNIT_TEST
+    (void)pos; (void)block_id; (void)count; (void)metadata;
+    return;
+#else
+    if (!texture_manager || block_id <= 0 || count <= 0) return;
+    if (block_id >= static_cast<int>(block_types.size()) || !block_types[block_id]) return;
+    dropped_items.push_back(std::make_unique<DroppedItem>(this, block_id, count, pos, metadata));
+#endif
+}
+
+void World::update_items(float dt) {
+#ifdef UNIT_TEST
+    (void)dt;
+    return;
+#else
+    glm::vec3 player_pos = player ? player->position + glm::vec3(0.0f, player->eyelevel * 0.5f, 0.0f) : glm::vec3(0.0f);
+    float pickup_radius = 1.8f;
+    float pickup_radius2 = pickup_radius * pickup_radius;
+
+    for (auto& item : dropped_items) {
+        item->update(dt);
+        if (item->should_remove()) continue;
+
+        if (player && item->can_pickup()) {
+            float dist2 = glm::length2(item->get_position() - player_pos);
+            if (dist2 <= pickup_radius2) {
+                int leftover = player->inventory.add_item(item->block_id, item->count, item->metadata);
+                if (leftover <= 0) {
+                    item->mark_removed();
+                    Audio::PlayPop();
+                } else {
+                    item->count = leftover;
+                }
+            }
+        }
+    }
+
+    dropped_items.erase(
+        std::remove_if(dropped_items.begin(), dropped_items.end(), [](const std::unique_ptr<DroppedItem>& item) {
+            return !item || item->should_remove() || item->expired() || item->count <= 0;
+        }),
+        dropped_items.end()
+    );
+#endif
+}
+
+void World::draw_items(const glm::mat4& view_proj, float brightness) {
+#ifdef UNIT_TEST
+    (void)view_proj; (void)brightness;
+    return;
+#else
+    if (!preview_renderer) return;
+    glm::vec3 light_dir = get_light_direction();
+
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    for (auto& item : dropped_items) {
+        if (!item || item->should_remove() || item->count <= 0) continue;
+        glm::mat4 model = item->model_matrix();
+        int id = item->block_id;
+        if (id <= 0 || id >= static_cast<int>(block_types.size())) continue;
+        BlockType* bt = block_types[id];
+        if (!bt) continue;
+        preview_renderer->draw_block(id, bt, model, view_proj, light_dir, brightness);
+    }
+    glDisable(GL_BLEND);
+#endif
+}
 void World::tick(float dt) {
     chunk_update_counter = 0; time++; pending_chunk_update_count = 0;
 
@@ -350,6 +439,7 @@ void World::tick(float dt) {
     propagate_decrease(true);
     propagate_skylight_increase(true);
     propagate_skylight_decrease(true);
+    update_items(dt);
 }
 
 void World::stitch_block_light(Chunk* c) {
@@ -658,6 +748,9 @@ void World::draw() {
 
     glEnable(GL_CULL_FACE);
     for(auto* c : visible_chunks) c->draw(GL_TRIANGLES);
+    if (player) {
+        draw_items(player->vp_matrix, dm);
+    }
     draw_translucent();
 }
 void World::draw_translucent() {

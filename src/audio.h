@@ -8,6 +8,7 @@ public:
     static void Update(float dt);
     static void Close();
     static void PlayMusic();
+    static void PlayPop();
     static void SetVolume(float volume);
     static float GetVolume();
 

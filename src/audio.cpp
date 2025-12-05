@@ -117,6 +117,16 @@ void Audio::Update(float dt) {
     }
 }
 
+void Audio::PlayPop() {
+    if (!engine_initialized) return;
+    std::string path = "assets/audio/pop.wav";
+    if (!std::filesystem::exists(path)) return;
+    ma_result result = ma_engine_play_sound(&engine, path.c_str(), NULL);
+    if (result != MA_SUCCESS) {
+        std::cout << "[Audio] Failed to play pop sound. Error code: " << result << std::endl;
+    }
+}
+
 void Audio::Close() {
     if (is_playing) ma_sound_uninit(&music_sound);
     if (engine_initialized) ma_engine_uninit(&engine);
