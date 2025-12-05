@@ -78,11 +78,17 @@ void InventoryUI::close(bool drop_cursor) {
     if (drop_cursor) drop_cursor_to_world();
 }
 
-void InventoryUI::handle_mouse_button(int button, int action, double mx, double my) {
+void InventoryUI::handle_mouse_button(int button, int action, double mx, double my, int mods) {
     if (!open_flag || action != GLFW_PRESS || !player) return;
     int slot_idx = slot_from_point(mx, my);
     if (slot_idx < 0) {
         if (!cursor.empty()) drop_cursor_to_world();
+        return;
+    }
+
+    // Shift+Click = быстрое перемещение между хотбаром и инвентарём
+    if ((mods & GLFW_MOD_SHIFT) && button == GLFW_MOUSE_BUTTON_LEFT) {
+        player->inventory.quick_transfer(slot_idx);
         return;
     }
 

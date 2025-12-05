@@ -18,7 +18,7 @@ public:
     void close(bool drop_cursor);
     bool is_open() const { return open_flag; }
 
-    void handle_mouse_button(int button, int action, double mx, double my);
+    void handle_mouse_button(int button, int action, double mx, double my, int mods = 0);
     void render(double cursor_x, double cursor_y);
     void drop_cursor_to_world();
 

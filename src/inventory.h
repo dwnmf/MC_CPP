@@ -24,11 +24,22 @@ public:
     int add_item_to_slot(int index, int id, int amount, int metadata = 0);
     int remove_from_slot(int index, int amount);
 
-    InventorySlot& slot(int index) { return slots[index]; }
-    const InventorySlot& slot(int index) const { return slots[index]; }
+    // Быстрое перемещение предмета (Shift+Click)
+    // Если слот в хотбаре - перемещает в основной инвентарь и наоборот
+    void quick_transfer(int index);
+
+    // Безопасный доступ к слоту с проверкой границ
+    InventorySlot* slot_safe(int index);
+    const InventorySlot* slot_safe(int index) const;
+
+    // Прямой доступ (для обратной совместимости, но теперь с проверкой)
+    InventorySlot& slot(int index);
+    const InventorySlot& slot(int index) const;
     const std::vector<InventorySlot>& data() const { return slots; }
 
-private:
     bool in_bounds(int index) const;
+
+private:
     std::vector<InventorySlot> slots;
+    static InventorySlot null_slot; // Заглушка для безопасного возврата
 };

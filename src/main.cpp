@@ -401,12 +401,35 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     }
 }
 
+// --- SCROLL CALLBACK (прокрутка хотбара колесиком) ---
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    if (in_menu) return;
+    // Если инвентарь открыт, не переключаем хотбар
+    if (inventory_ui && inventory_ui->is_open()) return;
+    if (!player_ptr) return;
+
+    // yoffset > 0 = прокрутка вверх (влево по хотбару)
+    // yoffset < 0 = прокрутка вниз (вправо по хотбару)
+    int delta = 0;
+    if (yoffset > 0) delta = -1;  // Прокрутка вверх = влево
+    else if (yoffset < 0) delta = 1;  // Прокрутка вниз = вправо
+
+    if (delta != 0) {
+        int new_slot = player_ptr->hotbar_selected + delta;
+        // Wrap around
+        if (new_slot < 0) new_slot = Inventory::HOTBAR_SIZE - 1;
+        if (new_slot >= Inventory::HOTBAR_SIZE) new_slot = 0;
+        player_ptr->hotbar_selected = new_slot;
+    }
+}
+
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     if (in_menu) return;
     if (inventory_ui && inventory_ui->is_open()) {
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
-        inventory_ui->handle_mouse_button(button, action, mx, my);
+        // Передаём модификаторы (mods) для поддержки Shift+Click
+        inventory_ui->handle_mouse_button(button, action, mx, my, mods);
         return;
     }
     if(action == GLFW_PRESS) {
@@ -534,6 +557,7 @@ int main() {
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetKeyCallback(window, key_callback);
+    glfwSetScrollCallback(window, scroll_callback);  // Прокрутка хотбара колесиком
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
