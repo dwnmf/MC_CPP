@@ -239,11 +239,8 @@ void SettingsMenu::render() {
 
 void SettingsMenu::render_title() {
     // Title with shadow effect
-    text_renderer->RenderText("MC-CPP", MARGIN_LEFT + 2.0f, TITLE_Y + 2.0f, 2.0f, glm::vec3(0.1f));
-    text_renderer->RenderText("MC-CPP", MARGIN_LEFT, TITLE_Y, 2.0f, glm::vec3(0.95f, 0.95f, 1.0f));
-    
-    // Subtitle
-    text_renderer->RenderText("Settings", MARGIN_LEFT, TITLE_Y + 50.0f, 1.0f, glm::vec3(0.7f, 0.7f, 0.75f));
+    text_renderer->RenderText("MC-CPP", MARGIN_LEFT + 2.0f, TITLE_Y + 2.0f, 1.8f, glm::vec3(0.1f));
+    text_renderer->RenderText("MC-CPP", MARGIN_LEFT, TITLE_Y, 1.8f, glm::vec3(1.0f, 0.95f, 0.9f));
 }
 
 void SettingsMenu::render_category_tabs() {
@@ -264,9 +261,9 @@ void SettingsMenu::render_category_tabs() {
         if (quad_renderer) {
             UiQuadStyle style;
             if (selected) {
-                style.color_top = glm::vec4(0.2f, 0.25f, 0.35f, 0.95f);
-                style.color_bottom = glm::vec4(0.12f, 0.15f, 0.22f, 0.95f);
-                style.border_color = glm::vec4(0.4f, 0.8f, 1.0f, 0.9f);
+                style.color_top = glm::vec4(0.28f, 0.22f, 0.15f, 0.95f);
+                style.color_bottom = glm::vec4(0.18f, 0.14f, 0.08f, 0.95f);
+                style.border_color = glm::vec4(1.0f, 0.75f, 0.3f, 0.9f);
                 style.border_width = 2.0f;
             } else {
                 style.color_top = glm::vec4(0.12f, 0.12f, 0.15f, 0.7f);
@@ -280,7 +277,7 @@ void SettingsMenu::render_category_tabs() {
         }
         
         // Draw tab text
-        glm::vec3 color = selected ? glm::vec3(0.9f, 0.95f, 1.0f) : glm::vec3(0.6f, 0.6f, 0.65f);
+        glm::vec3 color = selected ? glm::vec3(1.0f, 0.9f, 0.75f) : glm::vec3(0.6f, 0.6f, 0.65f);
         text_renderer->RenderText(categories[i].name, x, y, 0.9f, color);
         
         x += tab_width + 15.0f;
@@ -303,9 +300,9 @@ void SettingsMenu::render_items() {
             
             if (quad_renderer) {
                 UiQuadStyle style;
-                style.color_top = glm::vec4(0.2f, 0.25f, 0.35f, 0.4f * pulse);
-                style.color_bottom = glm::vec4(0.12f, 0.15f, 0.22f, 0.4f * pulse);
-                style.border_color = glm::vec4(0.4f, 0.8f, 1.0f, 0.6f);
+                style.color_top = glm::vec4(0.25f, 0.2f, 0.12f, 0.35f * pulse);
+                style.color_bottom = glm::vec4(0.18f, 0.14f, 0.08f, 0.35f * pulse);
+                style.border_color = glm::vec4(1.0f, 0.75f, 0.3f, 0.5f);
                 style.border_width = 1.5f;
                 style.corner_radius = 4.0f;
                 
@@ -319,7 +316,7 @@ void SettingsMenu::render_items() {
         
         // Selection arrow
         if (selected && item.is_interactive()) {
-            text_renderer->RenderText(">", MARGIN_LEFT - 25.0f, y, 1.0f, glm::vec3(0.4f, 0.85f, 1.0f));
+            text_renderer->RenderText(">", MARGIN_LEFT - 20.0f, y, 1.0f, glm::vec3(1.0f, 0.75f, 0.3f));
         }
         
         // Label color based on type and selection
@@ -352,7 +349,7 @@ void SettingsMenu::render_items() {
                 // Draw value text
                 std::string val_str = item.get_value_string();
                 text_renderer->RenderText(val_str, value_x + SLIDER_WIDTH + 15.0f, y, 0.9f, 
-                                         selected ? glm::vec3(0.9f, 0.95f, 1.0f) : glm::vec3(0.7f, 0.7f, 0.75f));
+                                         selected ? glm::vec3(1.0f, 0.95f, 0.85f) : glm::vec3(0.7f, 0.7f, 0.75f));
                 break;
             }
             
@@ -391,7 +388,7 @@ void SettingsMenu::render_items() {
             
             case MenuItemType::SELECT: {
                 std::string val_str = "< " + item.get_value_string() + " >";
-                glm::vec3 val_color = selected ? glm::vec3(0.9f, 0.95f, 1.0f) : glm::vec3(0.75f, 0.75f, 0.8f);
+                glm::vec3 val_color = selected ? glm::vec3(1.0f, 0.95f, 0.85f) : glm::vec3(0.75f, 0.75f, 0.8f);
                 text_renderer->RenderText(val_str, value_x, y, 0.9f, val_color);
                 break;
             }
@@ -401,9 +398,9 @@ void SettingsMenu::render_items() {
                 if (quad_renderer) {
                     UiQuadStyle style;
                     if (selected) {
-                        style.color_top = glm::vec4(0.25f, 0.3f, 0.4f, 0.95f);
-                        style.color_bottom = glm::vec4(0.15f, 0.18f, 0.25f, 0.95f);
-                        style.border_color = glm::vec4(0.5f, 0.85f, 1.0f, 0.9f);
+                        style.color_top = glm::vec4(0.28f, 0.22f, 0.15f, 0.95f);
+                        style.color_bottom = glm::vec4(0.18f, 0.14f, 0.08f, 0.95f);
+                        style.border_color = glm::vec4(1.0f, 0.75f, 0.3f, 0.9f);
                         style.glow_intensity = 0.3f;
                     } else {
                         style.color_top = glm::vec4(0.18f, 0.18f, 0.22f, 0.85f);
@@ -448,11 +445,11 @@ void SettingsMenu::render_slider_bar(float x, float y, float width, float fill_p
     if (fill_percent > 0.01f) {
         UiQuadStyle fill_style;
         if (selected) {
-            fill_style.color_top = glm::vec4(0.3f, 0.7f, 0.9f, 0.95f);
-            fill_style.color_bottom = glm::vec4(0.2f, 0.5f, 0.7f, 0.95f);
+            fill_style.color_top = glm::vec4(0.9f, 0.65f, 0.25f, 0.95f);
+            fill_style.color_bottom = glm::vec4(0.75f, 0.5f, 0.15f, 0.95f);
         } else {
-            fill_style.color_top = glm::vec4(0.25f, 0.5f, 0.65f, 0.85f);
-            fill_style.color_bottom = glm::vec4(0.15f, 0.35f, 0.5f, 0.85f);
+            fill_style.color_top = glm::vec4(0.7f, 0.55f, 0.3f, 0.85f);
+            fill_style.color_bottom = glm::vec4(0.55f, 0.4f, 0.2f, 0.85f);
         }
         fill_style.border_color = glm::vec4(0.0f);
         fill_style.corner_radius = 3.0f;

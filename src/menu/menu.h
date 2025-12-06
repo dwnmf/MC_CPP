@@ -68,13 +68,13 @@ private:
     bool prev_enter = false;
     
     // Layout constants
-    static constexpr float TITLE_Y = 40.0f;
-    static constexpr float CATEGORY_TAB_Y = 100.0f;
-    static constexpr float ITEMS_START_Y = 160.0f;
-    static constexpr float ITEM_HEIGHT = 40.0f;
-    static constexpr float MARGIN_LEFT = 60.0f;
-    static constexpr float VALUE_OFFSET = 350.0f;
-    static constexpr float SLIDER_WIDTH = 200.0f;
+    static constexpr float TITLE_Y = 30.0f;
+    static constexpr float CATEGORY_TAB_Y = 80.0f;
+    static constexpr float ITEMS_START_Y = 140.0f;
+    static constexpr float ITEM_HEIGHT = 36.0f;
+    static constexpr float MARGIN_LEFT = 50.0f;
+    static constexpr float VALUE_OFFSET = 280.0f;
+    static constexpr float SLIDER_WIDTH = 180.0f;
     
     // Helper methods
     void navigate_up();
