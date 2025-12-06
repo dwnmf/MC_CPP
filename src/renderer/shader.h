@@ -18,6 +18,7 @@ public:
     void setVec2i(int location, int x, int y) const;
     void setVec2(int location, const glm::vec2& value) const;
     void setVec3(int location, const glm::vec3& value) const;
+    void setVec4(int location, const glm::vec4& value) const;
     void setMat4Array(int location, const std::vector<glm::mat4>& mats) const;
     void setFloatArray(int location, const std::vector<float>& values) const;
 };

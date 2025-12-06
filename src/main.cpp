@@ -740,6 +740,7 @@ int main() {
         }
         draw_health_bar();
         if (inventory_ui) {
+            inventory_ui->update(static_cast<float>(dt));
             inventory_ui->render(cursor_x, cursor_y);
         }
         draw_f3_screen(fps_display);

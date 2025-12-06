@@ -89,6 +89,7 @@ void Shader::setFloat(int loc, float val) const { glUniform1f(loc, val); }
 void Shader::setVec2i(int loc, int x, int y) const { glUniform2i(loc, x, y); }
 void Shader::setVec2(int loc, const glm::vec2& vec) const { glUniform2fv(loc, 1, glm::value_ptr(vec)); }
 void Shader::setVec3(int loc, const glm::vec3& vec) const { glUniform3fv(loc, 1, glm::value_ptr(vec)); }
+void Shader::setVec4(int loc, const glm::vec4& vec) const { glUniform4fv(loc, 1, glm::value_ptr(vec)); }
 void Shader::setMat4Array(int loc, const std::vector<glm::mat4>& mats) const {
     if (loc < 0 || mats.empty()) return;
     glUniformMatrix4fv(loc, static_cast<GLsizei>(mats.size()), GL_FALSE, glm::value_ptr(mats[0]));
