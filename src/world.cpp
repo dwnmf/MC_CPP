@@ -406,6 +406,8 @@ void World::draw_items(const glm::mat4& view_proj, float brightness) {
     return;
 #else
     if (!preview_renderer) return;
+    if (dropped_items.empty()) return;  // Ранний выход если предметов нет
+    
     glm::vec3 light_dir = get_light_direction();
 
     glEnable(GL_CULL_FACE);
@@ -422,7 +424,18 @@ void World::draw_items(const glm::mat4& view_proj, float brightness) {
         if (!bt) continue;
         preview_renderer->draw_block(id, bt, model, view_proj, light_dir, brightness);
     }
-    glDisable(GL_BLEND);
+    
+    // Восстанавливаем состояние OpenGL для последующего рендеринга
+    // Блендинг оставляем включённым - он нужен для draw_translucent()
+    
+    // Восстанавливаем активную текстуру и шейдер мира
+    if (shader && shader->valid()) {
+        shader->use();
+        glActiveTexture(GL_TEXTURE0);
+        if (texture_manager) {
+            glBindTexture(GL_TEXTURE_2D_ARRAY, texture_manager->texture_array);
+        }
+    }
 #endif
 }
 void World::tick(float dt) {

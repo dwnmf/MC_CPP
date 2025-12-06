@@ -38,6 +38,12 @@ InventoryUI* inventory_ui = nullptr;
 UiQuadRenderer* quad_renderer = nullptr;
 
 bool mouse_captured = false;
+static bool g_reset_mouse_next_frame = false;
+
+void reset_mouse_position() {
+    g_reset_mouse_next_frame = true;
+}
+
 bool is_fullscreen = false;
 int windowed_x = 100, windowed_y = 100, windowed_w = 1366, windowed_h = 768;
 bool show_f3 = false;
@@ -383,7 +389,15 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     if (in_menu) return;
     if(!mouse_captured) return;
-    static double lastX = 400, lastY = 300; static bool firstMouse = true;
+    static double lastX = 400, lastY = 300;
+    static bool firstMouse = true;
+    
+    // Сброс позиции мыши при переходе из режима инвентаря
+    if (g_reset_mouse_next_frame) {
+        firstMouse = true;
+        g_reset_mouse_next_frame = false;
+    }
+    
     if (firstMouse) { lastX = xpos; lastY = ypos; firstMouse = false; }
     double xoffset = xpos - lastX; double yoffset = lastY - ypos; lastX = xpos; lastY = ypos;
     if(player_ptr) {
@@ -470,6 +484,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         if (inventory_ui && inventory_ui->is_open()) {
             inventory_ui->close(true);
             mouse_captured = true;
+            reset_mouse_position();  // Сбрасываем позицию мыши чтобы избежать рывка камеры
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         }
     };
