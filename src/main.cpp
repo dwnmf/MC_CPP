@@ -23,6 +23,8 @@
 #include "inventory_ui.h"
 #include "renderer/ui_quad_renderer.h"
 #include "inventory.h"
+#include "menu/menu.h"
+#include "menu/settings_menu.h"
 
 // --- КОНСТАНТЫ ---
 const std::string GAME_TITLE = "MC-CPP";
@@ -584,8 +586,16 @@ int main() {
     text_renderer = new TextRenderer(SCR_WIDTH, SCR_HEIGHT);
     text_renderer->Load("assets/font.ttf", 24);
     post_processor = new PostProcessor(SCR_WIDTH, SCR_HEIGHT);
+    
+    // Create quad renderer early for menu
+    quad_renderer = new UiQuadRenderer();
+    quad_renderer->set_screen_size(SCR_WIDTH, SCR_HEIGHT);
 
-    float menu_volume = Audio::GetVolume();
+    // Create and configure settings menu
+    Menu::SettingsMenu settings_menu(text_renderer, quad_renderer);
+    Menu::configure_settings_menu(settings_menu);
+    settings_menu.set_screen_size(SCR_WIDTH, SCR_HEIGHT);
+    
     double menu_prev = glfwGetTime();
     while (!glfwWindowShouldClose(window) && in_menu) {
         double menu_now = glfwGetTime();
@@ -593,46 +603,39 @@ int main() {
         menu_prev = menu_now;
 
         glfwPollEvents();
-
-        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            menu_volume = std::clamp(menu_volume - menu_dt * 0.5f, 0.0f, 1.0f);
-        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            menu_volume = std::clamp(menu_volume + menu_dt * 0.5f, 0.0f, 1.0f);
-        if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        
+        // Handle input through the menu
+        settings_menu.handle_input(window, menu_dt);
+        
+        // Check if user wants to start or quit
+        if (settings_menu.is_start_requested()) {
             in_menu = false;
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        }
+        if (settings_menu.is_quit_requested()) {
             glfwSetWindowShouldClose(window, true);
-
-        glClearColor(0.06f, 0.08f, 0.10f, 1.0f);
+        }
+        
+        // Clear screen with dark background
+        glClearColor(0.05f, 0.06f, 0.08f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_CULL_FACE);
-
-        int percent = static_cast<int>(menu_volume * 100.0f + 0.5f);
-        const int barSegments = 20;
-        int filledSegments = static_cast<int>(menu_volume * barSegments + 0.5f);
-        std::string bar = "[" + std::string(filledSegments, '=') + std::string(barSegments - filledSegments, ' ') + "]";
-
-        text_renderer->RenderText(GAME_TITLE, 40.0f, 80.0f, 1.6f, glm::vec3(1.0f));
-        text_renderer->RenderText("Music volume: " + std::to_string(percent) + "%", 40.0f, 130.0f, 1.0f, glm::vec3(0.9f));
-        text_renderer->RenderText(bar, 40.0f, 170.0f, 1.0f, glm::vec3(0.8f));
-        text_renderer->RenderText("A/D or Left/Right - adjust", 40.0f, 220.0f, 0.9f, glm::vec3(0.75f));
-        text_renderer->RenderText("Enter/Space - start, Esc - quit", 40.0f, 250.0f, 0.9f, glm::vec3(0.75f));
-
-        glEnable(GL_CULL_FACE);
-        glEnable(GL_DEPTH_TEST);
+        
+        // Render the menu
+        settings_menu.render();
 
         glfwSwapBuffers(window);
     }
 
     if (glfwWindowShouldClose(window)) {
+        delete quad_renderer;
+        quad_renderer = nullptr;
         delete post_processor;
         glfwTerminate();
         return 0;
     }
 
-    Audio::SetVolume(menu_volume);
+    // Apply settings from menu
+    Menu::SettingsStorage::apply();
+    glfwSwapInterval(Options::VSYNC ? 1 : 0);
     in_menu = false;
 
     Shader shader("assets/shaders/colored_lighting/vert.glsl", "assets/shaders/colored_lighting/frag.glsl");
@@ -655,8 +658,8 @@ int main() {
     world_ptr = &world;
     player_ptr = &player;
 
-    quad_renderer = new UiQuadRenderer();
-    if (quad_renderer) quad_renderer->set_screen_size(SCR_WIDTH, SCR_HEIGHT);
+
+    // quad_renderer already created for menu - just use it for inventory
     inventory_ui = new InventoryUI(&player, &world, text_renderer, world.get_preview_renderer(), quad_renderer);
     if (inventory_ui) inventory_ui->set_screen_size(SCR_WIDTH, SCR_HEIGHT);
 
