@@ -205,13 +205,19 @@ void World::propagate_increase(bool update, int max_steps) {
     while(!light_increase_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = light_increase_queue.front(); light_increase_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
-            glm::ivec3 n = pos + d; glm::ivec3 cp = get_chunk_pos(glm::vec3(n));
-            if(chunks.find(cp)==chunks.end()) continue;
-            int l = get_light(n);
-            if(!is_opaque_block(n) && l + 2 <= level) {
-                chunks[cp]->set_block_light(get_local_pos(glm::vec3(n)), level-1);
+            glm::ivec3 n = pos + d;
+            glm::ivec3 cp = get_chunk_pos(glm::vec3(n));
+            auto it = chunks.find(cp);
+            if(it == chunks.end()) continue;
+            Chunk* chunk = it->second;
+            glm::ivec3 lp = get_local_pos(glm::vec3(n));
+            int l = chunk->get_block_light(lp);
+            int bn = chunk->blocks[lp.x][lp.y][lp.z];
+            bool opaque = (bn != 0 && !block_types[bn]->transparent);
+            if(!opaque && l + 2 <= level) {
+                chunk->set_block_light(lp, level-1);
                 light_increase_queue.push_back({n, level-1});
-                if(update) chunks[cp]->update_at_position(get_local_pos(glm::vec3(n)));
+                if(update) chunk->update_at_position(lp);
             }
         }
     }
@@ -226,13 +232,21 @@ void World::propagate_decrease(bool update, int max_steps) {
     while(!light_decrease_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = light_decrease_queue.front(); light_decrease_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
-            glm::ivec3 n = pos + d; if(chunks.find(get_chunk_pos(glm::vec3(n))) == chunks.end()) continue;
-            int nl = get_light(n); if(nl == 0) continue;
+            glm::ivec3 n = pos + d;
+            glm::ivec3 cp = get_chunk_pos(glm::vec3(n));
+            auto it = chunks.find(cp);
+            if(it == chunks.end()) continue;
+            Chunk* chunk = it->second;
+            glm::ivec3 lp = get_local_pos(glm::vec3(n));
+            int nl = chunk->get_block_light(lp);
+            if(nl == 0) continue;
             if(nl < level) {
-                chunks[get_chunk_pos(glm::vec3(n))]->set_block_light(get_local_pos(glm::vec3(n)), 0);
-                if(update) chunks[get_chunk_pos(glm::vec3(n))]->update_at_position(get_local_pos(glm::vec3(n)));
+                chunk->set_block_light(lp, 0);
+                if(update) chunk->update_at_position(lp);
                 light_decrease_queue.push_back({n, nl});
-            } else if(nl >= level) { light_increase_queue.push_back({n, nl}); }
+            } else if(nl >= level) {
+                light_increase_queue.push_back({n, nl});
+            }
         }
     }
 }
@@ -302,22 +316,29 @@ void World::propagate_skylight_increase(bool update, int max_steps) {
     while(!skylight_increase_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = skylight_increase_queue.front(); skylight_increase_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
-            glm::ivec3 n = pos + d; if(n.y >= CHUNK_HEIGHT || n.y < 0) continue;
-            if(chunks.find(get_chunk_pos(glm::vec3(n))) == chunks.end()) continue;
+            glm::ivec3 n = pos + d;
+            if(n.y >= CHUNK_HEIGHT || n.y < 0) continue;
+            glm::ivec3 cp = get_chunk_pos(glm::vec3(n));
+            auto it = chunks.find(cp);
+            if(it == chunks.end()) continue;
+            Chunk* chunk = it->second;
+            glm::ivec3 lp = get_local_pos(glm::vec3(n));
 
-            int block_id = get_block_number(n);
+            int block_id = chunk->blocks[lp.x][lp.y][lp.z];
             int decay = 1;
             if (d.y == -1) {
                 decay = 0;
                 if (block_id != 0 && !block_types[block_id]->glass) decay = 1;
             }
 
-            if(!is_opaque_block(n)) {
-                int nl = get_skylight(n); int new_l = level - decay;
+            bool opaque = (block_id != 0 && !block_types[block_id]->transparent);
+            if(!opaque) {
+                int nl = chunk->get_sky_light(lp);
+                int new_l = level - decay;
                 if (new_l > nl && new_l > 0) {
-                    chunks[get_chunk_pos(glm::vec3(n))]->set_sky_light(get_local_pos(glm::vec3(n)), new_l);
+                    chunk->set_sky_light(lp, new_l);
                     skylight_increase_queue.push_back({n, new_l});
-                    if(update) chunks[get_chunk_pos(glm::vec3(n))]->update_at_position(get_local_pos(glm::vec3(n)));
+                    if(update) chunk->update_at_position(lp);
                 }
             }
         }
@@ -329,12 +350,18 @@ void World::propagate_skylight_decrease(bool update, int max_steps) {
     while(!skylight_decrease_queue.empty() && steps_left-- > 0) {
         auto [pos, level] = skylight_decrease_queue.front(); skylight_decrease_queue.pop_front();
         for(auto& d : Util::DIRECTIONS) {
-            glm::ivec3 n = pos + d; if(chunks.find(get_chunk_pos(glm::vec3(n))) == chunks.end()) continue;
-            int nl = get_skylight(n); if(nl == 0) continue;
+            glm::ivec3 n = pos + d;
+            glm::ivec3 cp = get_chunk_pos(glm::vec3(n));
+            auto it = chunks.find(cp);
+            if(it == chunks.end()) continue;
+            Chunk* chunk = it->second;
+            glm::ivec3 lp = get_local_pos(glm::vec3(n));
+            int nl = chunk->get_sky_light(lp);
+            if(nl == 0) continue;
 
             if(d.y == -1 || nl < level) {
-                chunks[get_chunk_pos(glm::vec3(n))]->set_sky_light(get_local_pos(glm::vec3(n)), 0);
-                if(update) chunks[get_chunk_pos(glm::vec3(n))]->update_at_position(get_local_pos(glm::vec3(n)));
+                chunk->set_sky_light(lp, 0);
+                if(update) chunk->update_at_position(lp);
                 skylight_decrease_queue.push_back({n, nl});
             } else if(nl >= level) {
                 skylight_increase_queue.push_back({n, nl});
@@ -522,10 +549,14 @@ void World::prepare_rendering() {
     candidates.reserve(chunks.size());
     glm::vec3 player_pos = player->position;
     for(auto& kv : chunks) {
+        // Frustum culling: skip chunks outside the view frustum
+        if (!player->check_in_frustum(kv.second->chunk_position)) continue;
+        
         glm::vec3 center = kv.second->position + glm::vec3(CHUNK_WIDTH * 0.5f, CHUNK_HEIGHT * 0.5f, CHUNK_LENGTH * 0.5f);
         float dist2 = glm::length2(player_pos - center);
         candidates.push_back({dist2, kv.second});
     }
+    // Sort back-to-front for correct translucent rendering
     std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b){ return a.first > b.first; });
     visible_chunks.reserve(candidates.size());
     for (auto& c : candidates) visible_chunks.push_back(c.second);

@@ -13,6 +13,13 @@ const int SUBCHUNK_WIDTH = 16;
 const int SUBCHUNK_HEIGHT = 16;
 const int SUBCHUNK_LENGTH = 16;
 
+// Combined face attributes for optimized mesh generation
+struct FaceAttributes {
+    std::array<float, 4> shading;
+    std::array<float, 4> lights;
+    std::array<float, 4> skylights;
+};
+
 class Subchunk {
 public:
     Chunk* parent;
@@ -33,9 +40,15 @@ private:
     std::array<float, 4> get_face_ao(bool s1, bool s2, bool s3, bool s4, bool s5, bool s6, bool s7, bool s8);
     std::array<float, 4> get_smooth_face_light(float light, float l1, float l2, float l3, float l4, float l5, float l6, float l7, float l8);
     std::array<glm::ivec3, 8> get_neighbour_voxels(glm::ivec3 npos, int face);
+    
+    // Optimized combined function
+    FaceAttributes get_face_attributes(int block, BlockType& bt, int face, glm::ivec3 pos, glm::ivec3 npos);
+    
+    // Legacy functions (kept for compatibility, rarely used now)
     std::array<float, 4> get_light(int block, int face, glm::ivec3 pos, glm::ivec3 npos);
     std::array<float, 4> get_skylight(int block, int face, glm::ivec3 pos, glm::ivec3 npos);
     std::array<float, 4> get_shading(int block, BlockType& bt, int face, glm::ivec3 npos);
     void add_face(int face, glm::ivec3 pos, glm::ivec3 lpos, int block, BlockType& bt, glm::ivec3 npos);
     bool can_render_face(BlockType& bt, int block_number, glm::ivec3 position);
 };
+

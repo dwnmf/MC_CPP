@@ -88,6 +88,73 @@ std::array<glm::ivec3, 8> Subchunk::get_neighbour_voxels(glm::ivec3 npos, int fa
     return n;
 }
 
+// OPTIMIZED: Combined face attributes - compute neighbors once, cache is_opaque results
+FaceAttributes Subchunk::get_face_attributes(int block, BlockType& bt, int face, glm::ivec3 pos, glm::ivec3 npos) {
+    FaceAttributes result;
+    
+    // Non-cube blocks use simple lighting
+    if (!bt.is_cube) {
+        float light_val = static_cast<float>(parent->get_light_cached(pos));
+        float sky_val = static_cast<float>(parent->get_skylight_cached(pos));
+        result.lights = {light_val, light_val, light_val, light_val};
+        result.skylights = {sky_val, sky_val, sky_val, sky_val};
+        result.shading = {1.0f, 1.0f, 1.0f, 1.0f};
+        return result;
+    }
+    
+    bool complex_model = (bt.vertex_positions.size() != 6);
+    
+    // Complex models don't use smooth lighting
+    if (!Options::SMOOTH_LIGHTING || complex_model) {
+        glm::ivec3 target = complex_model ? pos : npos;
+        float light_val = static_cast<float>(parent->get_light_cached(target));
+        float sky_val = static_cast<float>(parent->get_skylight_cached(npos));
+        result.lights = {light_val, light_val, light_val, light_val};
+        result.skylights = {sky_val, sky_val, sky_val, sky_val};
+        
+        // Shading from block type
+        if (!Options::SMOOTH_LIGHTING) {
+            const auto& src = bt.shading_values[face];
+            for (int i = 0; i < 4 && i < static_cast<int>(src.size()); i++) result.shading[i] = src[i];
+        } else {
+            result.shading = {1.0f, 1.0f, 1.0f, 1.0f};
+        }
+        return result;
+    }
+    
+    // Full smooth lighting path - compute neighbors ONCE
+    auto neighbors = get_neighbour_voxels(npos, face);
+    
+    // Cache opaque states for all 8 neighbors (used for AO shading)
+    bool opaque[8];
+    for (int i = 0; i < 8; i++) {
+        opaque[i] = parent->is_opaque_cached(neighbors[i]);
+    }
+    
+    // Compute AO shading using cached opaque values
+    result.shading = get_face_ao(opaque[0], opaque[1], opaque[2], opaque[3], opaque[4], opaque[5], opaque[6], opaque[7]);
+    
+    // Compute smooth lighting - use target_pos for light (may differ for complex models)
+    glm::ivec3 light_target = complex_model ? pos : npos;
+    float l = parent->get_light_cached(light_target);
+    result.lights = get_smooth_face_light(l,
+        parent->get_light_cached(neighbors[0]), parent->get_light_cached(neighbors[1]),
+        parent->get_light_cached(neighbors[2]), parent->get_light_cached(neighbors[3]),
+        parent->get_light_cached(neighbors[4]), parent->get_light_cached(neighbors[5]),
+        parent->get_light_cached(neighbors[6]), parent->get_light_cached(neighbors[7]));
+    
+    // Compute smooth skylighting
+    float sl = parent->get_skylight_cached(npos);
+    result.skylights = get_smooth_face_light(sl,
+        parent->get_skylight_cached(neighbors[0]), parent->get_skylight_cached(neighbors[1]),
+        parent->get_skylight_cached(neighbors[2]), parent->get_skylight_cached(neighbors[3]),
+        parent->get_skylight_cached(neighbors[4]), parent->get_skylight_cached(neighbors[5]),
+        parent->get_skylight_cached(neighbors[6]), parent->get_skylight_cached(neighbors[7]));
+    
+    return result;
+}
+
+// Legacy wrappers for compatibility (will be inlined by compiler)
 std::array<float, 4> Subchunk::get_light(int block, int face, glm::ivec3 pos, glm::ivec3 npos) {
     BlockType& bt = *world->block_types[block];
     if (!bt.is_cube) {
@@ -151,9 +218,9 @@ std::array<float, 4> Subchunk::get_shading(int block, BlockType& bt, int face, g
 
 void Subchunk::add_face(int face, glm::ivec3 pos, glm::ivec3 lpos, int block, BlockType& bt, glm::ivec3 npos) {
     auto& target = bt.translucent ? translucent_mesh : mesh;
-    auto shading = get_shading(block, bt, face, npos);
-    auto lights = get_light(block, face, pos, npos);
-    auto skylights = get_skylight(block, face, pos, npos);
+    
+    // OPTIMIZED: Use combined function that computes neighbors only once
+    auto attrs = get_face_attributes(block, bt, face, pos, npos);
 
     bool has_uv = (face < static_cast<int>(bt.tex_coords.size()));
 
@@ -169,9 +236,9 @@ void Subchunk::add_face(int face, glm::ivec3 pos, glm::ivec3 lpos, int block, Bl
         }
 
         uint8_t layer = static_cast<uint8_t>(bt.tex_indices[face]);
-        uint8_t shade = pack_shading(shading[i]);
-        uint8_t bl = static_cast<uint8_t>(std::clamp<int>(static_cast<int>(lights[i]), 0, 15));
-        uint8_t sl = static_cast<uint8_t>(std::clamp<int>(static_cast<int>(skylights[i]), 0, 15));
+        uint8_t shade = pack_shading(attrs.shading[i]);
+        uint8_t bl = static_cast<uint8_t>(std::clamp<int>(static_cast<int>(attrs.lights[i]), 0, 15));
+        uint8_t sl = static_cast<uint8_t>(std::clamp<int>(static_cast<int>(attrs.skylights[i]), 0, 15));
 
         int16_t px = pack_pos_component(vx);
         int16_t py = pack_pos_component(vy);
